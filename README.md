@@ -1,0 +1,2 @@
+# AuraBars
+AIMP Visualization plugin
