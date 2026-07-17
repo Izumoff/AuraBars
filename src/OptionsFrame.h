@@ -35,6 +35,7 @@ private:
     void UpdateEnabledStates();
     void PickColor(int buttonId, COLORREF& target);
     void NotifyModified();
+    void ResetToDefaults();
 
     void InitTabs();
     void SwitchToTab(int index);

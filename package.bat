@@ -11,6 +11,17 @@ call "%ROOT%build.bat"
 if errorlevel 1 exit /b 1
 
 echo.
+echo === Reading version from src\Version.h ===
+set "VERSION="
+for /f "tokens=3" %%A in ('findstr /C:"#define AURABARS_VERSION_STRING" "%ROOT%src\Version.h"') do set "VERSION_RAW=%%A"
+if not defined VERSION_RAW (
+    echo Could not find AURABARS_VERSION_STRING in src\Version.h
+    exit /b 1
+)
+set "VERSION=%VERSION_RAW:"=%"
+echo Version: %VERSION%
+
+echo.
 echo === Staging package layout ===
 if exist "%STAGE%" rmdir /s /q "%STAGE%"
 mkdir "%STAGE%"
@@ -25,6 +36,7 @@ if errorlevel 1 exit /b 1
 
 if exist "%STAGE%\ReadMe.txt" del /f /q "%STAGE%\ReadMe.txt"
 > "%STAGE%\ReadMe.txt" echo AuraBars
+>> "%STAGE%\ReadMe.txt" echo Version: %VERSION%
 >> "%STAGE%\ReadMe.txt" echo.
 >> "%STAGE%\ReadMe.txt" echo LED/Smooth spectrum bar visualization plugin for AIMP.
 >> "%STAGE%\ReadMe.txt" echo.

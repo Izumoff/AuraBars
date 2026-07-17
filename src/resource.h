@@ -6,6 +6,12 @@
 #define IDC_TAB_BTN1                     1052
 #define IDC_TAB_BTN2                     1053
 #define IDC_TAB_BTN3                     1054
+#define IDC_TAB_BTN4                     1055
+#define IDC_TAB_BTN5                     1056
+
+#define IDC_LBL_VERSION                  1119
+#define IDC_LBL_VERSION_VALUE            1120
+#define IDC_RESET_DEFAULTS_BTN           1032
 
 #define IDC_BARCOUNT_EDIT               1001
 #define IDC_AMPSCALE_COMBO              1002

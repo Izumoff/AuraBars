@@ -1,5 +1,6 @@
 #include "OptionsFrame.h"
 #include "resource.h"
+#include "Version.h"
 #include <commdlg.h>
 #include <cstdio>
 #include <cstdlib>
@@ -48,38 +49,46 @@ namespace
     // The dialog holds all controls for all tabs at once; switching tabs
     // just shows one group and hides the rest, rather than swapping in
     // separate child dialogs.
-    const int kTabDataScaling[] = {
-        IDC_LBL_BARCOUNT, IDC_BARCOUNT_EDIT,
+    const int kTabSystem[] = {
+        IDC_LBL_VERSION, IDC_LBL_VERSION_VALUE,
+        IDC_RESET_DEFAULTS_BTN,
+        IDC_DEBUGLOG_CHECK,
+    };
+
+    const int kTabScaling[] = {
         IDC_LBL_AMPSCALE, IDC_AMPSCALE_COMBO,
         IDC_LBL_DBFLOOR, IDC_DBFLOOR_EDIT,
         IDC_LBL_DBCEILING, IDC_DBCEILING_EDIT,
         IDC_AUTOGAIN_CHECK,
+        IDC_LBL_BARCOUNT, IDC_BARCOUNT_EDIT,
+        IDC_LBL_SEGMENTGAP, IDC_SEGMENTGAP_EDIT,
+        IDC_LBL_SEGMENTHEIGHT, IDC_SEGMENTHEIGHT_EDIT,
     };
 
-    const int kTabAppearance[] = {
+    const int kTabBars[] = {
         IDC_LBL_BARSTYLE, IDC_BARSTYLE_COMBO,
         IDC_LBL_BARCOLORMODE, IDC_BARCOLORMODE_COMBO,
         IDC_LBL_BARCOLOR, IDC_BARCOLOR_BTN,
         IDC_LBL_BARGRADTOP, IDC_BARGRADTOP_BTN,
         IDC_LBL_BARGRADBOTTOM, IDC_BARGRADBOTTOM_BTN,
-        IDC_LBL_BACKSTYLE, IDC_BACKSTYLE_COMBO,
-        IDC_LBL_BACKCOLOR, IDC_BACKCOLOR_BTN,
-        IDC_GRIDLINES_CHECK, IDC_GRIDCOLOR_BTN,
         IDC_LBL_BARSPACING, IDC_BARSPACING_EDIT,
-        IDC_LBL_TOPMARGIN, IDC_TOPMARGIN_EDIT,
-        IDC_LBL_SEGMENTGAP, IDC_SEGMENTGAP_EDIT,
-        IDC_LBL_SEGMENTHEIGHT, IDC_SEGMENTHEIGHT_EDIT,
     };
 
-    const int kTabPeakMarkers[] = {
+    const int kTabPeaks[] = {
         IDC_PEAKMARKERS_CHECK, IDC_PEAKCOLOR_BTN,
         IDC_LBL_PEAKFALLSPEED, IDC_PEAKFALLSPEED_EDIT,
         IDC_LBL_PEAKTHICKNESS, IDC_PEAKTHICKNESS_EDIT,
         IDC_LBL_PEAKHEIGHTSEG, IDC_PEAKHEIGHTSEG_EDIT,
     };
 
-    const int kTabDebug[] = {
-        IDC_DEBUGLOG_CHECK,
+    const int kTabBackground[] = {
+        IDC_LBL_BACKSTYLE, IDC_BACKSTYLE_COMBO,
+        IDC_LBL_BACKCOLOR, IDC_BACKCOLOR_BTN,
+        IDC_GRIDLINES_CHECK, IDC_GRIDCOLOR_BTN,
+    };
+
+    const int kTabLayout[] = {
+        IDC_LBL_TOPMARGIN, IDC_TOPMARGIN_EDIT,
     };
 
     void ShowGroup(HWND dlg, const int* ids, size_t count, bool show)
@@ -219,16 +228,18 @@ INT_PTR COptionsFrame::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam)
 
 void COptionsFrame::InitTabs()
 {
-    CheckRadioButton(m_hDlg, IDC_TAB_BTN0, IDC_TAB_BTN3, IDC_TAB_BTN0);
+    CheckRadioButton(m_hDlg, IDC_TAB_BTN0, IDC_TAB_BTN5, IDC_TAB_BTN0);
     SwitchToTab(0);
 }
 
 void COptionsFrame::SwitchToTab(int index)
 {
-    ShowGroup(m_hDlg, kTabDataScaling, _countof(kTabDataScaling), index == 0);
-    ShowGroup(m_hDlg, kTabAppearance, _countof(kTabAppearance), index == 1);
-    ShowGroup(m_hDlg, kTabPeakMarkers, _countof(kTabPeakMarkers), index == 2);
-    ShowGroup(m_hDlg, kTabDebug, _countof(kTabDebug), index == 3);
+    ShowGroup(m_hDlg, kTabSystem, _countof(kTabSystem), index == 0);
+    ShowGroup(m_hDlg, kTabScaling, _countof(kTabScaling), index == 1);
+    ShowGroup(m_hDlg, kTabBars, _countof(kTabBars), index == 2);
+    ShowGroup(m_hDlg, kTabPeaks, _countof(kTabPeaks), index == 3);
+    ShowGroup(m_hDlg, kTabBackground, _countof(kTabBackground), index == 4);
+    ShowGroup(m_hDlg, kTabLayout, _countof(kTabLayout), index == 5);
 }
 
 void COptionsFrame::HandleCommand(WPARAM wParam, LPARAM lParam)
@@ -242,8 +253,15 @@ void COptionsFrame::HandleCommand(WPARAM wParam, LPARAM lParam)
         case IDC_TAB_BTN1:
         case IDC_TAB_BTN2:
         case IDC_TAB_BTN3:
+        case IDC_TAB_BTN4:
+        case IDC_TAB_BTN5:
             if (code == BN_CLICKED)
                 SwitchToTab(id - IDC_TAB_BTN0);
+            return;
+
+        case IDC_RESET_DEFAULTS_BTN:
+            if (code == BN_CLICKED)
+                ResetToDefaults();
             return;
 
         case IDC_BARCOLOR_BTN:
@@ -334,6 +352,8 @@ void COptionsFrame::PickColor(int buttonId, COLORREF& target)
 
 void COptionsFrame::PopulateControls()
 {
+    SetDlgItemTextW(m_hDlg, IDC_LBL_VERSION_VALUE, AURABARS_VERSION_WSTR);
+
     SetDlgItemInt(m_hDlg, IDC_BARCOUNT_EDIT, m_Working.barCount, FALSE);
 
     SetComboItems2(m_hDlg, IDC_AMPSCALE_COMBO, L"Linear", L"Logarithmic (dB)", (int)m_Working.amplitudeScaling);
@@ -421,6 +441,16 @@ void COptionsFrame::UpdateEnabledStates()
     EnableWindow(GetDlgItem(m_hDlg, IDC_LBL_SEGMENTGAP), isLed);
     EnableWindow(GetDlgItem(m_hDlg, IDC_SEGMENTHEIGHT_EDIT), isLed);
     EnableWindow(GetDlgItem(m_hDlg, IDC_LBL_SEGMENTHEIGHT), isLed);
+}
+
+void COptionsFrame::ResetToDefaults()
+{
+    // Resets only the in-dialog working copy, same as every other edit
+    // here - the user still has to Apply/OK to persist it, and Cancel
+    // still backs out cleanly.
+    m_Working = AuraBarsSettings{};
+    PopulateControls();
+    NotifyModified();
 }
 
 void COptionsFrame::NotifyModified()
