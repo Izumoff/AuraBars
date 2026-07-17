@@ -1,29 +1,23 @@
 @echo off
 setlocal
 
-set "VCVARS=C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvarsall.bat"
-set "SDKINC=A:\_Data\Projects\AuraBars\aimp-sdk\Sources\Cpp"
-set "SRC=%~dp0src"
-set "OUT=%~dp0build"
+rem Usage: build.bat [x86|x64]
+rem   No argument builds both architectures.
+rem Each architecture builds in its own "cmd /c" subshell so vcvarsall.bat's
+rem PATH/LIB/INCLUDE changes for one arch can never leak into the other.
 
-if not exist "%OUT%" mkdir "%OUT%"
+set "TARGETS=%~1"
+if "%TARGETS%"=="" set "TARGETS=x64 x86"
 
-call "%VCVARS%" x64
-if errorlevel 1 exit /b 1
+for %%A in (%TARGETS%) do (
+    echo.
+    echo === Building %%A ===
+    cmd /c call "%~dp0build-one.bat" %%A
+    if errorlevel 1 (
+        echo Build failed for %%A
+        exit /b 1
+    )
+)
 
-rc /nologo /fo "%OUT%\AuraBars.res" /i "%SRC%" "%SRC%\AuraBars.rc"
-if errorlevel 1 exit /b 1
-
-cl /nologo /std:c++17 /EHsc /W3 /O2 /MD /DUNICODE /D_UNICODE ^
-   /I "%SDKINC%" /I "%SRC%" ^
-   /Fo"%OUT%\\" ^
-   /c ^
-   "%SRC%\Common.cpp" "%SRC%\Settings.cpp" "%SRC%\Visualization.cpp" "%SRC%\OptionsFrame.cpp" "%SRC%\Plugin.cpp" "%SRC%\DllMain.cpp"
-if errorlevel 1 exit /b 1
-
-link /nologo /DLL /MACHINE:X64 /OUT:"%OUT%\AuraBars.dll" ^
-   "%OUT%\Common.obj" "%OUT%\Settings.obj" "%OUT%\Visualization.obj" "%OUT%\OptionsFrame.obj" "%OUT%\Plugin.obj" "%OUT%\DllMain.obj" "%OUT%\AuraBars.res" ^
-   user32.lib gdi32.lib comdlg32.lib comctl32.lib msimg32.lib ole32.lib uuid.lib
-if errorlevel 1 exit /b 1
-
-echo Build succeeded: %OUT%\AuraBars.dll
+echo.
+echo All builds succeeded.
