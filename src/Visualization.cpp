@@ -345,8 +345,18 @@ void CVisualization::DrawBars(HDC dc, const RECT& area, const TAIMPVisualData* d
     const int spacing = g_Settings.barSpacing;
     const int totalSpacing = spacing * (n - 1);
     const int availWidth = std::max(0, (int)(area.right - area.left) - totalSpacing);
-    const int barWidth = std::max(1, availWidth / n);
     const int totalHeight = area.bottom - area.top;
+
+    // Per-bar width via cumulative rounding rather than a single truncated
+    // availWidth/n: each bar's boundary is independently rounded from the
+    // running total, so the few leftover pixels from the division spread
+    // out one-per-bar across the row instead of all landing on whichever
+    // bar's rect gets clamped to area.right (previously the last bar,
+    // which came out visibly wider with an inconsistent gap before it).
+    auto widthBoundary = [availWidth, n](int i) -> int
+    {
+        return (int)std::llround((double)availWidth * i / n);
+    };
 
     // Log-scale bin edges: bar i covers bins [edge(i), edge(i+1)), and the
     // edges grow exponentially rather than linearly. Equal-width linear
@@ -415,6 +425,8 @@ void CVisualization::DrawBars(HDC dc, const RECT& area, const TAIMPVisualData* d
         float value = NormalizeMagnitude(rawValue, ceilingDb);
 
         int barHeightPx = (int)std::lround(value * totalHeight);
+
+        int barWidth = std::max(1, widthBoundary(i + 1) - widthBoundary(i));
 
         RECT barRect;
         barRect.left = x;
