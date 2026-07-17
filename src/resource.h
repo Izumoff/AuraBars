@@ -37,6 +37,9 @@
 #define IDC_SEGMENTGAP_EDIT             1022
 #define IDC_SEGMENTHEIGHT_EDIT          1024
 #define IDC_DEBUGLOG_CHECK              1030
+#define IDC_GRIDSPACING_EDIT            1033
+#define IDC_GRIDOPACITY_EDIT            1034
+#define IDC_GRIDSTYLE_COMBO             1035
 
 #define IDC_LBL_BARGRADTOP              1101
 #define IDC_LBL_BARGRADBOTTOM           1102
@@ -56,5 +59,8 @@
 #define IDC_LBL_BARSPACING              1116
 #define IDC_LBL_TOPMARGIN               1117
 #define IDC_LBL_PEAKFALLSPEED           1118
+#define IDC_LBL_GRIDSPACING             1121
+#define IDC_LBL_GRIDOPACITY             1122
+#define IDC_LBL_GRIDSTYLE               1123
 
 #define IDC_STATIC                      -1

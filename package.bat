@@ -34,11 +34,13 @@ if errorlevel 1 exit /b 1
 copy /Y "%BUILD%\x64\AuraBars.dll" "%STAGE%\x64\AuraBars.dll" >nul
 if errorlevel 1 exit /b 1
 
+rem First two lines are exact, required text for AIMP's plugin list page:
+rem   line 1: author name "Kex"
+rem   line 2: description + "v<version>", version sourced from Version.h
+rem           above so it can never drift from the System tab's display.
 if exist "%STAGE%\ReadMe.txt" del /f /q "%STAGE%\ReadMe.txt"
-> "%STAGE%\ReadMe.txt" echo AuraBars
->> "%STAGE%\ReadMe.txt" echo Version: %VERSION%
->> "%STAGE%\ReadMe.txt" echo.
->> "%STAGE%\ReadMe.txt" echo LED/Smooth spectrum bar visualization plugin for AIMP.
+> "%STAGE%\ReadMe.txt" echo Kex
+>> "%STAGE%\ReadMe.txt" echo LED/Smooth spectrum bar visualization plugin for AIMP. v%VERSION%
 >> "%STAGE%\ReadMe.txt" echo.
 >> "%STAGE%\ReadMe.txt" echo Installation:
 >> "%STAGE%\ReadMe.txt" echo   Copy the contents of this folder into your AIMP Plugins directory,

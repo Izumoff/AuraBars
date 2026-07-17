@@ -31,12 +31,25 @@ public:
     void WINAPI Resize(int NewWidth, int NewHeight) override;
 
 private:
+    // One bar's fully-resolved geometry and audio data for this frame,
+    // computed once up front so both the grid pass and the bar-drawing
+    // pass can use the same values without recomputing spectrum math.
+    struct BarLayout
+    {
+        RECT rect;      // left/right/bottom fixed; top = current amplitude-based top
+        float rawValue;
+        float rawDb;
+        float peakY;    // this frame's updated peak-marker Y, device px
+    };
+
     void EnsureBackBuffer();
     void ReleaseBackBuffer();
 
     void DrawBackground(HDC dc, const RECT& area);
-    void DrawGrid(HDC dc, const RECT& area);
-    void DrawBars(HDC dc, const RECT& area, const TAIMPVisualData* data);
+    COLORREF BackgroundColorAtY(int y, const RECT& area) const;
+    void ComputeBarLayout(const RECT& area, const TAIMPVisualData* data, std::vector<BarLayout>& out);
+    void DrawGrid(HDC dc, const RECT& area, const std::vector<BarLayout>& bars);
+    void DrawBarVisuals(HDC dc, const RECT& area, const std::vector<BarLayout>& bars);
     void DrawLedBar(HDC dc, const RECT& barRect, const RECT& area);
     void DrawSmoothBar(HDC dc, const RECT& barRect, const RECT& area);
     void DrawPeakMarker(HDC dc, const RECT& barRect, const RECT& area, float peakTopY);

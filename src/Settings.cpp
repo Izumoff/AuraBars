@@ -19,6 +19,9 @@ namespace
     const wchar_t* kKeyBackgroundColor       = L"AuraBars\\BackgroundColor";
     const wchar_t* kKeyGridLines             = L"AuraBars\\GridLines";
     const wchar_t* kKeyGridLineColor         = L"AuraBars\\GridLineColor";
+    const wchar_t* kKeyGridLineSpacing       = L"AuraBars\\GridLineSpacing";
+    const wchar_t* kKeyGridLineOpacity       = L"AuraBars\\GridLineOpacity";
+    const wchar_t* kKeyGridLineStyle         = L"AuraBars\\GridLineStyle";
     const wchar_t* kKeyPeakMarkers           = L"AuraBars\\PeakMarkers";
     const wchar_t* kKeyPeakMarkerColor       = L"AuraBars\\PeakMarkerColor";
     const wchar_t* kKeyPeakFallSpeed         = L"AuraBars\\PeakFallSpeed";
@@ -77,6 +80,8 @@ void ClampSettings(AuraBarsSettings& s)
     s.segmentGap = std::clamp(s.segmentGap, 1, 8);
     s.segmentHeight = std::clamp(s.segmentHeight, 4, 20);
     s.topMarginPercent = std::clamp(s.topMarginPercent, 0, 30);
+    s.gridLineSpacing = std::clamp(s.gridLineSpacing, 8, 100);
+    s.gridLineOpacity = std::clamp(s.gridLineOpacity, 0, 100);
 }
 
 void LoadSettings(IAIMPServiceConfig* cfg, AuraBarsSettings& s)
@@ -100,6 +105,9 @@ void LoadSettings(IAIMPServiceConfig* cfg, AuraBarsSettings& s)
     s.backgroundColor = (COLORREF)ReadInt(cfg, kKeyBackgroundColor, (int)def.backgroundColor);
     s.gridLines = ReadInt(cfg, kKeyGridLines, def.gridLines ? 1 : 0) != 0;
     s.gridLineColor = (COLORREF)ReadInt(cfg, kKeyGridLineColor, (int)def.gridLineColor);
+    s.gridLineSpacing = ReadInt(cfg, kKeyGridLineSpacing, def.gridLineSpacing);
+    s.gridLineOpacity = ReadInt(cfg, kKeyGridLineOpacity, def.gridLineOpacity);
+    s.gridLineStyle = (GridLineStyle)ReadInt(cfg, kKeyGridLineStyle, (int)def.gridLineStyle);
     s.peakMarkers = ReadInt(cfg, kKeyPeakMarkers, def.peakMarkers ? 1 : 0) != 0;
     s.peakMarkerColor = (COLORREF)ReadInt(cfg, kKeyPeakMarkerColor, (int)def.peakMarkerColor);
     s.peakFallSpeed = ReadFloat(cfg, kKeyPeakFallSpeed, def.peakFallSpeed);
@@ -133,6 +141,9 @@ void SaveSettings(IAIMPServiceConfig* cfg, const AuraBarsSettings& s)
     WriteInt(cfg, kKeyBackgroundColor, (int)s.backgroundColor);
     WriteInt(cfg, kKeyGridLines, s.gridLines ? 1 : 0);
     WriteInt(cfg, kKeyGridLineColor, (int)s.gridLineColor);
+    WriteInt(cfg, kKeyGridLineSpacing, s.gridLineSpacing);
+    WriteInt(cfg, kKeyGridLineOpacity, s.gridLineOpacity);
+    WriteInt(cfg, kKeyGridLineStyle, (int)s.gridLineStyle);
     WriteInt(cfg, kKeyPeakMarkers, s.peakMarkers ? 1 : 0);
     WriteInt(cfg, kKeyPeakMarkerColor, (int)s.peakMarkerColor);
     WriteFloat(cfg, kKeyPeakFallSpeed, s.peakFallSpeed);

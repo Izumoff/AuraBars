@@ -6,10 +6,11 @@ enum class BarStyle { LED = 0, Smooth = 1 };
 enum class ColorMode { Solid = 0, Gradient = 1 };
 enum class BackgroundStyle { Flat = 0, Gradient = 1 };
 enum class AmplitudeScaling { Linear = 0, Logarithmic = 1 };
+enum class GridLineStyle { Dashed = 0, Solid = 1 };
 
 struct AuraBarsSettings
 {
-    int barCount = 40;                                 // 8-128
+    int barCount = 20;                                  // 8-128
     AmplitudeScaling amplitudeScaling = AmplitudeScaling::Logarithmic;
     double dbFloor = -40.0;                            // dB, -100.0 to -20.0, Logarithmic only
     double dbCeiling = 0.0;                            // dB, -20.0 to 0.0, Logarithmic only
@@ -23,6 +24,9 @@ struct AuraBarsSettings
     COLORREF backgroundColor = RGB(0x0A, 0x0A, 0x0A);
     bool gridLines = false;
     COLORREF gridLineColor = RGB(0x30, 0x30, 0x30);
+    int gridLineSpacing = 24;                          // px between grid lines, 8-100
+    int gridLineOpacity = 100;                          // %, 0-100
+    GridLineStyle gridLineStyle = GridLineStyle::Dashed;
     bool peakMarkers = true;
     COLORREF peakMarkerColor = RGB(0xFD, 0x42, 0x2D);
     double peakFallSpeed = 1.5;                        // px/frame, 0.1-10.0

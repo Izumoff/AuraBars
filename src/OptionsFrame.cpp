@@ -85,6 +85,9 @@ namespace
         IDC_LBL_BACKSTYLE, IDC_BACKSTYLE_COMBO,
         IDC_LBL_BACKCOLOR, IDC_BACKCOLOR_BTN,
         IDC_GRIDLINES_CHECK, IDC_GRIDCOLOR_BTN,
+        IDC_LBL_GRIDSPACING, IDC_GRIDSPACING_EDIT,
+        IDC_LBL_GRIDOPACITY, IDC_GRIDOPACITY_EDIT,
+        IDC_LBL_GRIDSTYLE, IDC_GRIDSTYLE_COMBO,
     };
 
     const int kTabLayout[] = {
@@ -302,6 +305,7 @@ void COptionsFrame::HandleCommand(WPARAM wParam, LPARAM lParam)
             return;
 
         case IDC_BACKSTYLE_COMBO:
+        case IDC_GRIDSTYLE_COMBO:
             if (code == CBN_SELCHANGE)
                 NotifyModified();
             return;
@@ -323,6 +327,8 @@ void COptionsFrame::HandleCommand(WPARAM wParam, LPARAM lParam)
         case IDC_TOPMARGIN_EDIT:
         case IDC_SEGMENTGAP_EDIT:
         case IDC_SEGMENTHEIGHT_EDIT:
+        case IDC_GRIDSPACING_EDIT:
+        case IDC_GRIDOPACITY_EDIT:
             if (code == EN_CHANGE)
                 NotifyModified();
             return;
@@ -364,6 +370,7 @@ void COptionsFrame::PopulateControls()
     SetComboItems2(m_hDlg, IDC_BARSTYLE_COMBO, L"LED", L"Smooth", (int)m_Working.barStyle);
     SetComboItems2(m_hDlg, IDC_BARCOLORMODE_COMBO, L"Solid", L"Gradient", (int)m_Working.barColorMode);
     SetComboItems2(m_hDlg, IDC_BACKSTYLE_COMBO, L"Flat", L"Gradient", (int)m_Working.backgroundStyle);
+    SetComboItems2(m_hDlg, IDC_GRIDSTYLE_COMBO, L"Dashed", L"Solid", (int)m_Working.gridLineStyle);
 
     SetButtonColorText(m_hDlg, IDC_BARCOLOR_BTN, m_Working.barColorSolid);
     SetButtonColorText(m_hDlg, IDC_BARGRADTOP_BTN, m_Working.barGradientTop);
@@ -373,6 +380,8 @@ void COptionsFrame::PopulateControls()
     SetButtonColorText(m_hDlg, IDC_PEAKCOLOR_BTN, m_Working.peakMarkerColor);
 
     CheckDlgButton(m_hDlg, IDC_GRIDLINES_CHECK, m_Working.gridLines ? BST_CHECKED : BST_UNCHECKED);
+    SetDlgItemInt(m_hDlg, IDC_GRIDSPACING_EDIT, m_Working.gridLineSpacing, FALSE);
+    SetDlgItemInt(m_hDlg, IDC_GRIDOPACITY_EDIT, m_Working.gridLineOpacity, FALSE);
     CheckDlgButton(m_hDlg, IDC_PEAKMARKERS_CHECK, m_Working.peakMarkers ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(m_hDlg, IDC_DEBUGLOG_CHECK, m_Working.debugLogging ? BST_CHECKED : BST_UNCHECKED);
 
@@ -397,6 +406,7 @@ void COptionsFrame::ReadControlsIntoWorking()
     m_Working.barStyle = (BarStyle)SendMessageW(GetDlgItem(m_hDlg, IDC_BARSTYLE_COMBO), CB_GETCURSEL, 0, 0);
     m_Working.barColorMode = (ColorMode)SendMessageW(GetDlgItem(m_hDlg, IDC_BARCOLORMODE_COMBO), CB_GETCURSEL, 0, 0);
     m_Working.backgroundStyle = (BackgroundStyle)SendMessageW(GetDlgItem(m_hDlg, IDC_BACKSTYLE_COMBO), CB_GETCURSEL, 0, 0);
+    m_Working.gridLineStyle = (GridLineStyle)SendMessageW(GetDlgItem(m_hDlg, IDC_GRIDSTYLE_COMBO), CB_GETCURSEL, 0, 0);
 
     m_Working.gridLines = IsDlgButtonChecked(m_hDlg, IDC_GRIDLINES_CHECK) == BST_CHECKED;
     m_Working.peakMarkers = IsDlgButtonChecked(m_hDlg, IDC_PEAKMARKERS_CHECK) == BST_CHECKED;
@@ -409,6 +419,8 @@ void COptionsFrame::ReadControlsIntoWorking()
     m_Working.topMarginPercent = GetDlgItemInt(m_hDlg, IDC_TOPMARGIN_EDIT, nullptr, FALSE);
     m_Working.segmentGap = GetDlgItemInt(m_hDlg, IDC_SEGMENTGAP_EDIT, nullptr, FALSE);
     m_Working.segmentHeight = GetDlgItemInt(m_hDlg, IDC_SEGMENTHEIGHT_EDIT, nullptr, FALSE);
+    m_Working.gridLineSpacing = GetDlgItemInt(m_hDlg, IDC_GRIDSPACING_EDIT, nullptr, FALSE);
+    m_Working.gridLineOpacity = GetDlgItemInt(m_hDlg, IDC_GRIDOPACITY_EDIT, nullptr, FALSE);
 
     // Colors are already current in m_Working; PickColor() updates it live.
 }

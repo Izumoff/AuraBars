@@ -42,6 +42,19 @@ namespace
         DeleteObject(br);
     }
 
+    // Plain GDI has no alpha-channel pens, so "grid line opacity" is faked
+    // by pre-blending the grid color against whatever's already painted
+    // underneath it (t=0 -> pure background, t=1 -> pure grid color) and
+    // drawing that blended color as an ordinary opaque pen.
+    COLORREF BlendColor(COLORREF a, COLORREF b, double t)
+    {
+        t = std::clamp(t, 0.0, 1.0);
+        BYTE r = (BYTE)std::lround(GetRValue(a) + (GetRValue(b) - GetRValue(a)) * t);
+        BYTE g = (BYTE)std::lround(GetGValue(a) + (GetGValue(b) - GetGValue(a)) * t);
+        BYTE bl = (BYTE)std::lround(GetBValue(a) + (GetBValue(b) - GetBValue(a)) * t);
+        return RGB(r, g, bl);
+    }
+
     const float kSilenceFloorDb = -120.0f; // avoids log10(0) = -inf
 
     // AIMP's raw Spectrum[] magnitudes are not normalized to 0.0-1.0 (the
@@ -233,15 +246,24 @@ void WINAPI CVisualization::Draw(HCANVAS Canvas, PAIMPVisualData Data)
     RECT area = { 0, 0, m_Width, m_Height };
 
     DrawBackground(m_MemDC, area);
-    if (g_Settings.gridLines)
-        DrawGrid(m_MemDC, area);
 
     // Top margin only shrinks the range bar heights scale against, so a
     // 100%-level bar stops short of the panel's top edge; background and
     // grid lines still fill the whole panel.
     RECT barArea = area;
     barArea.top += (LONG)std::lround((area.bottom - area.top) * (g_Settings.topMarginPercent / 100.0));
-    DrawBars(m_MemDC, barArea, Data);
+
+    std::vector<BarLayout> bars;
+    ComputeBarLayout(barArea, Data, bars);
+
+    // Grid needs each bar's current top *before* it draws, so it can skip
+    // every pixel below that top for that bar's column - LED segment gaps
+    // included, since that whole span visually belongs to the bar even
+    // where the bar itself doesn't paint every pixel of it.
+    if (g_Settings.gridLines)
+        DrawGrid(m_MemDC, area, bars);
+
+    DrawBarVisuals(m_MemDC, barArea, bars);
 
     BitBlt(Canvas, 0, 0, m_Width, m_Height, m_MemDC, 0, 0, SRCCOPY);
 }
@@ -261,22 +283,61 @@ void CVisualization::DrawBackground(HDC dc, const RECT& area)
     }
 }
 
-void CVisualization::DrawGrid(HDC dc, const RECT& area)
+COLORREF CVisualization::BackgroundColorAtY(int y, const RECT& area) const
 {
-    const int kLines = 8;
-    HPEN pen = CreatePen(PS_DASH, 1, g_Settings.gridLineColor);
-    HPEN old = (HPEN)SelectObject(dc, pen);
+    if (g_Settings.backgroundStyle == BackgroundStyle::Flat)
+        return g_Settings.backgroundColor;
 
-    int h = area.bottom - area.top;
-    for (int i = 1; i <= kLines; ++i)
+    // Mirrors DrawBackground's gradient exactly, so a grid line blended
+    // against "the background" reads as blended against what's actually
+    // underneath it at that row, not a flat approximation.
+    COLORREF top = LightenColor(g_Settings.backgroundColor, 0.35);
+    return ColorAtHeight(top, g_Settings.backgroundColor, y, area);
+}
+
+void CVisualization::DrawGrid(HDC dc, const RECT& area, const std::vector<BarLayout>& bars)
+{
+    const int spacingPx = std::clamp(g_Settings.gridLineSpacing, 8, 100);
+    const double opacity = std::clamp(g_Settings.gridLineOpacity, 0, 100) / 100.0;
+    const int penStyle = (g_Settings.gridLineStyle == GridLineStyle::Solid) ? PS_SOLID : PS_DASH;
+
+    for (int y = area.top + spacingPx; y < area.bottom; y += spacingPx)
     {
-        int y = area.top + (int)((double)h * i / (kLines + 1));
-        MoveToEx(dc, area.left, y, nullptr);
-        LineTo(dc, area.right, y);
-    }
+        COLORREF lineColor = BlendColor(BackgroundColorAtY(y, area), g_Settings.gridLineColor, opacity);
+        HPEN pen = CreatePen(penStyle, 1, lineColor);
+        HPEN old = (HPEN)SelectObject(dc, pen);
 
-    SelectObject(dc, old);
-    DeleteObject(pen);
+        // Draw only through empty space: the margins before the first bar
+        // and after the last, the gaps between bars, and the headroom
+        // above each bar's current top. Never across a bar's own occupied
+        // column, even through its LED segment gaps - previously the grid
+        // line drawn underneath was only hidden where a lit segment
+        // happened to paint over it, leaving visible dashes poking through
+        // every gap between segments.
+        int cursorX = area.left;
+        for (const BarLayout& bar : bars)
+        {
+            if (bar.rect.left > cursorX)
+            {
+                MoveToEx(dc, cursorX, y, nullptr);
+                LineTo(dc, bar.rect.left, y);
+            }
+            if (y < bar.rect.top)
+            {
+                MoveToEx(dc, bar.rect.left, y, nullptr);
+                LineTo(dc, bar.rect.right, y);
+            }
+            cursorX = bar.rect.right;
+        }
+        if (cursorX < area.right)
+        {
+            MoveToEx(dc, cursorX, y, nullptr);
+            LineTo(dc, area.right, y);
+        }
+
+        SelectObject(dc, old);
+        DeleteObject(pen);
+    }
 }
 
 COLORREF CVisualization::ColorAtHeight(COLORREF top, COLORREF bottom, int y, const RECT& area) const
@@ -334,13 +395,16 @@ void CVisualization::LogDebugSample(int firstIdx, float firstRaw, float firstDb,
     AppendDebugLog(line);
 }
 
-void CVisualization::DrawBars(HDC dc, const RECT& area, const TAIMPVisualData* data)
+void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* data, std::vector<BarLayout>& out)
 {
     const int n = std::clamp(g_Settings.barCount, 8, 128);
     if ((int)m_PeakY.size() != n)
         m_PeakY.assign(n, (float)area.bottom);
     if ((int)m_AutoGainCeilingDb.size() != n)
         m_AutoGainCeilingDb.assign(n, (float)g_Settings.dbCeiling);
+
+    out.clear();
+    out.reserve(n);
 
     const int spacing = g_Settings.barSpacing;
     const int totalSpacing = spacing * (n - 1);
@@ -434,11 +498,6 @@ void CVisualization::DrawBars(HDC dc, const RECT& area, const TAIMPVisualData* d
         barRect.bottom = area.bottom;
         barRect.top = area.bottom - barHeightPx;
 
-        if (g_Settings.barStyle == BarStyle::LED)
-            DrawLedBar(dc, barRect, area);
-        else
-            DrawSmoothBar(dc, barRect, area);
-
         // Peak marker: snaps up instantly to a louder bar, falls at the
         // configured speed otherwise (both in device pixels/frame).
         float& peakY = m_PeakY[i];
@@ -448,8 +507,7 @@ void CVisualization::DrawBars(HDC dc, const RECT& area, const TAIMPVisualData* d
         else
             peakY = std::min((float)area.bottom, peakY + (float)g_Settings.peakFallSpeed);
 
-        if (g_Settings.peakMarkers)
-            DrawPeakMarker(dc, barRect, area, peakY);
+        out.push_back({ barRect, rawValue, rawDb, peakY });
 
         x += barWidth + spacing;
     }
@@ -464,6 +522,20 @@ void CVisualization::DrawBars(HDC dc, const RECT& area, const TAIMPVisualData* d
                             debugIdxMid, debugRawMid, debugDbMid,
                             debugIdxLast, debugRawLast, debugDbLast);
         }
+    }
+}
+
+void CVisualization::DrawBarVisuals(HDC dc, const RECT& area, const std::vector<BarLayout>& bars)
+{
+    for (const BarLayout& bar : bars)
+    {
+        if (g_Settings.barStyle == BarStyle::LED)
+            DrawLedBar(dc, bar.rect, area);
+        else
+            DrawSmoothBar(dc, bar.rect, area);
+
+        if (g_Settings.peakMarkers)
+            DrawPeakMarker(dc, bar.rect, area, bar.peakY);
     }
 }
 

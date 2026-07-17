@@ -17,21 +17,21 @@ Native C++ visualization plugin for AIMP (x64). Spectrum-bar meter implementing 
 
 ## Build
 
-MSVC x64, `vcvarsall.bat x64` environment required. `build.bat` → `build/AuraBars.dll`.
+MSVC (x86 + x64), `vcvarsall.bat` environment required per architecture. `build.bat` → `build/x86/AuraBars.dll` and `build/x64/AuraBars.dll`. `package.bat` assembles both into `AuraBars.aimppack`.
 
-## Install (manual test)
+## Install
 
-Close AIMP → copy `AuraBars.dll` to `C:\Program Files\AIMP\Plugins` (admin required) → relaunch AIMP.
+**Via package**: double-click `AuraBars.aimppack` — AIMP handles architecture selection automatically.
+
+**Manual test**: close AIMP → copy the matching-architecture `AuraBars.dll` to `C:\Program Files\AIMP\Plugins` (admin required) → relaunch AIMP.
 
 ## Known issues
 
-- dB scaling miscalibrated: raw spectrum magnitude isn't normalized to 0–1, so bins regularly produce +20 to +33 dB against a 0 dB ceiling default, clamping most bars to max. Needs a calibration/reference divisor before `20*log10(x)`, or a rebased ceiling default matching actual data scale.
-- 1px stray line rendered above the peak marker
-- Last (rightmost) bar width incorrect — inconsistent with other bars
+- Strange rendering of the Settings dialog (when clicking on tabs - AIMP rerender everything well)
+- Horizontal dashed line shows white background between dashes (looks like feature)
 
 ## TODO
 
-- About tab in settings dialog
 - Left/right/bottom margin settings
 - Horizontal grid line customization (spacing, style)
 - Bottom panel
