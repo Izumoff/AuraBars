@@ -224,6 +224,24 @@ INT_PTR COptionsFrame::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam)
             HandleCommand(wParam, lParam);
             return TRUE;
 
+        case WM_WINDOWPOSCHANGED:
+        {
+            // AIMP calls CreateFrame() and gets back an HWND that is NOT
+            // yet inserted/visible in its settings-page container - it
+            // does that itself sometime *after* CreateFrame() returns, so
+            // WM_INITDIALOG (which runs synchronously inside
+            // CreateDialogParamW, before CreateFrame() even returns) fires
+            // on a window nobody can see yet. Re-asserting the active tab
+            // here, at the moment the window is actually revealed
+            // (SWP_SHOWWINDOW), is what makes the very first reveal
+            // correct instead of relying on a stale paint from creation
+            // time that a later tab click happened to correct.
+            const WINDOWPOS* wp = reinterpret_cast<const WINDOWPOS*>(lParam);
+            if (wp && (wp->flags & SWP_SHOWWINDOW))
+                SwitchToTab(m_ActiveTab);
+            return FALSE;
+        }
+
         default:
             return FALSE;
     }
@@ -237,12 +255,22 @@ void COptionsFrame::InitTabs()
 
 void COptionsFrame::SwitchToTab(int index)
 {
+    m_ActiveTab = index;
+
     ShowGroup(m_hDlg, kTabSystem, _countof(kTabSystem), index == 0);
     ShowGroup(m_hDlg, kTabScaling, _countof(kTabScaling), index == 1);
     ShowGroup(m_hDlg, kTabBars, _countof(kTabBars), index == 2);
     ShowGroup(m_hDlg, kTabPeaks, _countof(kTabPeaks), index == 3);
     ShowGroup(m_hDlg, kTabBackground, _countof(kTabBackground), index == 4);
     ShowGroup(m_hDlg, kTabLayout, _countof(kTabLayout), index == 5);
+
+    // ShowWindow() only schedules invalidation; it doesn't force an
+    // immediate repaint. Forcing one here means every call site - initial
+    // setup, a real tab click, or the WM_WINDOWPOSCHANGED re-assertion
+    // above - always leaves the correct single-tab state actually painted,
+    // not just logically set.
+    InvalidateRect(m_hDlg, nullptr, TRUE);
+    UpdateWindow(m_hDlg);
 }
 
 void COptionsFrame::HandleCommand(WPARAM wParam, LPARAM lParam)
@@ -358,7 +386,7 @@ void COptionsFrame::PickColor(int buttonId, COLORREF& target)
 
 void COptionsFrame::PopulateControls()
 {
-    SetDlgItemTextW(m_hDlg, IDC_LBL_VERSION_VALUE, AURABARS_VERSION_WSTR);
+    SetDlgItemTextW(m_hDlg, IDC_LBL_VERSION_VALUE, AURABARS_FULL_VERSION_WSTR);
 
     SetDlgItemInt(m_hDlg, IDC_BARCOUNT_EDIT, m_Working.barCount, FALSE);
 

@@ -299,40 +299,80 @@ void CVisualization::DrawGrid(HDC dc, const RECT& area, const std::vector<BarLay
 {
     const int spacingPx = std::clamp(g_Settings.gridLineSpacing, 8, 100);
     const double opacity = std::clamp(g_Settings.gridLineOpacity, 0, 100) / 100.0;
-    const int penStyle = (g_Settings.gridLineStyle == GridLineStyle::Solid) ? PS_SOLID : PS_DASH;
+    const bool dashed = (g_Settings.gridLineStyle != GridLineStyle::Solid);
+
+    // True whenever nothing in [xStart, xEnd) at row y belongs to a bar's
+    // occupied column (from that bar's current top down to the panel
+    // bottom, LED gaps included - see DrawBarVisuals/ComputeBarLayout).
+    auto isRowClear = [&bars](int y, int xStart, int xEnd) -> bool
+    {
+        for (const BarLayout& bar : bars)
+        {
+            if (y < bar.rect.top)
+                continue; // this bar's column isn't occupied up at this row
+            if (bar.rect.right > xStart && bar.rect.left < xEnd)
+                return false;
+        }
+        return true;
+    };
+
+    // Dashed style needs its own segment computation rather than a GDI
+    // PS_DASH pen: GDI restarts a dash pattern's phase at every separate
+    // MoveToEx/LineTo call (breaking multi-segment rows out of phase), and
+    // even a single continuous line clipped to a region still partially
+    // renders any dash segment that straddles a clip boundary - a bar's
+    // edge - as a short stray fragment, since clipping just hides pixels
+    // without knowing it's cutting a dash in half. Computing our own fixed-
+    // phase segments and only drawing ones entirely clear of every bar
+    // avoids both: one consistent phase across the full width, and no
+    // partial-dash slivers hugging bar tops.
+    const int kDashOn = 6;
+    const int kDashGap = 4;
+    const int kDashCycle = kDashOn + kDashGap;
 
     for (int y = area.top + spacingPx; y < area.bottom; y += spacingPx)
     {
         COLORREF lineColor = BlendColor(BackgroundColorAtY(y, area), g_Settings.gridLineColor, opacity);
-        HPEN pen = CreatePen(penStyle, 1, lineColor);
+        HPEN pen = CreatePen(PS_SOLID, 1, lineColor);
         HPEN old = (HPEN)SelectObject(dc, pen);
 
-        // Draw only through empty space: the margins before the first bar
-        // and after the last, the gaps between bars, and the headroom
-        // above each bar's current top. Never across a bar's own occupied
-        // column, even through its LED segment gaps - previously the grid
-        // line drawn underneath was only hidden where a lit segment
-        // happened to paint over it, leaving visible dashes poking through
-        // every gap between segments.
-        int cursorX = area.left;
-        for (const BarLayout& bar : bars)
+        if (dashed)
         {
-            if (bar.rect.left > cursorX)
+            for (int x = area.left; x < area.right; x += kDashCycle)
+            {
+                int segEnd = std::min(x + kDashOn, (int)area.right);
+                if (isRowClear(y, x, segEnd))
+                {
+                    MoveToEx(dc, x, y, nullptr);
+                    LineTo(dc, segEnd, y);
+                }
+            }
+        }
+        else
+        {
+            // A continuous solid stroke has no dash phase to protect, so
+            // drawing it as several segments (skipping occupied columns)
+            // is fine - no seam is visible between adjacent segments.
+            int cursorX = area.left;
+            for (const BarLayout& bar : bars)
+            {
+                if (bar.rect.left > cursorX)
+                {
+                    MoveToEx(dc, cursorX, y, nullptr);
+                    LineTo(dc, bar.rect.left, y);
+                }
+                if (y < bar.rect.top)
+                {
+                    MoveToEx(dc, bar.rect.left, y, nullptr);
+                    LineTo(dc, bar.rect.right, y);
+                }
+                cursorX = bar.rect.right;
+            }
+            if (cursorX < area.right)
             {
                 MoveToEx(dc, cursorX, y, nullptr);
-                LineTo(dc, bar.rect.left, y);
+                LineTo(dc, area.right, y);
             }
-            if (y < bar.rect.top)
-            {
-                MoveToEx(dc, bar.rect.left, y, nullptr);
-                LineTo(dc, bar.rect.right, y);
-            }
-            cursorX = bar.rect.right;
-        }
-        if (cursorX < area.right)
-        {
-            MoveToEx(dc, cursorX, y, nullptr);
-            LineTo(dc, area.right, y);
         }
 
         SelectObject(dc, old);

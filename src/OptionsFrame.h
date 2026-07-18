@@ -43,4 +43,5 @@ private:
     std::atomic<long> m_RefCount{1};
     HWND m_hDlg = nullptr;
     AuraBarsSettings m_Working;
+    int m_ActiveTab = 0;
 };
