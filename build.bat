@@ -11,10 +11,11 @@ if "%TARGETS%"=="" set "TARGETS=x64 x86"
 
 rem Generated once per run (not per-architecture, so x86 and x64 always
 rem share the identical build number) and included by both Version.h (for
-rem the System tab) and package.bat (for ReadMe.txt), so there is exactly
+rem the System tab) and package.bat (for AuraBars.txt), so there is exactly
 rem one place a build's identity comes from - never hand-edit this file.
+rem HHmm only (last 4 digits) - just enough to tell today's builds apart.
 echo === Generating build number ===
-for /f %%T in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMddHHmm"') do set "BUILDNUM=%%T"
+for /f %%T in ('powershell -NoProfile -Command "Get-Date -Format HHmm"') do set "BUILDNUM=%%T"
 if not defined BUILDNUM (
     echo Failed to generate build number
     exit /b 1

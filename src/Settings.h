@@ -7,6 +7,7 @@ enum class ColorMode { Solid = 0, Gradient = 1 };
 enum class BackgroundStyle { Flat = 0, Gradient = 1 };
 enum class AmplitudeScaling { Linear = 0, Logarithmic = 1 };
 enum class GridLineStyle { Dashed = 0, Solid = 1 };
+enum class ChannelMode { Mono = 0, Stereo = 1 };
 
 struct AuraBarsSettings
 {
@@ -37,6 +38,10 @@ struct AuraBarsSettings
     int segmentGap = 2;                                // px, 1-8, LED only
     int segmentHeight = 4;                             // px, 4-20, LED only
     bool debugLogging = false;                         // once/sec, writes sample bars' raw+dB values to %TEMP%\AuraBars_debug.log
+    ChannelMode channelMode = ChannelMode::Mono;
+    int channelGap = 8;                                // px, Stereo only, 0-40
+    int leftMargin = 0;                                // px, 0-100, outer margin (Mono: left edge of the spectrum; Stereo: left edge of the left channel)
+    int rightMargin = 0;                               // px, 0-100, outer margin (Mono: right edge of the spectrum; Stereo: right edge of the right channel)
 };
 
 // Live settings shared by the visualization and the options dialog: the

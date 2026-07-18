@@ -40,6 +40,10 @@
 #define IDC_GRIDSPACING_EDIT            1033
 #define IDC_GRIDOPACITY_EDIT            1034
 #define IDC_GRIDSTYLE_COMBO             1035
+#define IDC_CHANNELMODE_COMBO           1036
+#define IDC_CHANNELGAP_EDIT             1037
+#define IDC_LEFTMARGIN_EDIT             1038
+#define IDC_RIGHTMARGIN_EDIT            1039
 
 #define IDC_LBL_BARGRADTOP              1101
 #define IDC_LBL_BARGRADBOTTOM           1102
@@ -62,5 +66,9 @@
 #define IDC_LBL_GRIDSPACING             1121
 #define IDC_LBL_GRIDOPACITY             1122
 #define IDC_LBL_GRIDSTYLE               1123
+#define IDC_LBL_CHANNELMODE             1124
+#define IDC_LBL_CHANNELGAP              1125
+#define IDC_LBL_LEFTMARGIN              1126
+#define IDC_LBL_RIGHTMARGIN             1127
 
 #define IDC_STATIC                      -1

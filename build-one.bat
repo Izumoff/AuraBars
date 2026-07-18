@@ -23,7 +23,7 @@ rem both architectures, before calling this script. This just keeps a
 rem standalone "build-one.bat x64" from hard-failing on a fresh checkout
 rem that never had build.bat run yet.
 if not exist "%SRC%\BuildNumber.h" (
-    for /f %%T in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMddHHmm"') do set "BUILDNUM=%%T"
+    for /f %%T in ('powershell -NoProfile -Command "Get-Date -Format HHmm"') do set "BUILDNUM=%%T"
     > "%SRC%\BuildNumber.h" echo #pragma once
     >> "%SRC%\BuildNumber.h" echo // Auto-generated - do not hand-edit.
     >> "%SRC%\BuildNumber.h" echo #define AURABARS_BUILD_NUMBER "%BUILDNUM%"

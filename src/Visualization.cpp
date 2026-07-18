@@ -180,7 +180,8 @@ HRESULT WINAPI CVisualization::Initialize(int Width, int Height)
 {
     m_Width = Width;
     m_Height = Height;
-    m_AutoGainCeilingDb.clear();
+    m_AutoGainCeilingDbLeft.clear();
+    m_AutoGainCeilingDbRight.clear();
     EnsureBackBuffer();
     return S_OK;
 }
@@ -200,8 +201,11 @@ void WINAPI CVisualization::Resize(int NewWidth, int NewHeight)
     m_Width = NewWidth;
     m_Height = NewHeight;
     EnsureBackBuffer();
-    m_PeakY.clear(); // stale pixel coordinates from the old size are meaningless
-    m_AutoGainCeilingDb.clear();
+    // Stale pixel coordinates from the old size are meaningless.
+    m_PeakYLeft.clear();
+    m_PeakYRight.clear();
+    m_AutoGainCeilingDbLeft.clear();
+    m_AutoGainCeilingDbRight.clear();
 }
 
 void CVisualization::EnsureBackBuffer()
@@ -249,12 +253,48 @@ void WINAPI CVisualization::Draw(HCANVAS Canvas, PAIMPVisualData Data)
 
     // Top margin only shrinks the range bar heights scale against, so a
     // 100%-level bar stops short of the panel's top edge; background and
-    // grid lines still fill the whole panel.
+    // grid lines still fill the whole panel. Left/right margin instead
+    // narrows the horizontal drawable range the bars themselves lay out
+    // within - background and grid still span the full panel width too,
+    // only the bars (and, in Stereo, the two-channel split within that
+    // narrowed range) respect it.
     RECT barArea = area;
     barArea.top += (LONG)std::lround((area.bottom - area.top) * (g_Settings.topMarginPercent / 100.0));
+    barArea.left += std::clamp(g_Settings.leftMargin, 0, 100);
+    barArea.right -= std::clamp(g_Settings.rightMargin, 0, 100);
+    if (barArea.right < barArea.left)
+        barArea.right = barArea.left;
 
     std::vector<BarLayout> bars;
-    ComputeBarLayout(barArea, Data, bars);
+
+    if (g_Settings.channelMode == ChannelMode::Stereo)
+    {
+        // Split the margined range into two independent channel halves
+        // separated by Channel gap - a setting distinct from, and applied
+        // on top of, the left/right margins above.
+        const int gap = std::clamp(g_Settings.channelGap, 0, 40);
+        const int totalAvail = std::max(0, (int)(barArea.right - barArea.left));
+        const int usable = std::max(0, totalAvail - gap);
+        const int leftWidth = usable / 2;
+        const int rightWidth = usable - leftWidth;
+
+        RECT leftRect = barArea;
+        leftRect.right = leftRect.left + leftWidth;
+        RECT rightRect = barArea;
+        rightRect.left = barArea.right - rightWidth;
+
+        std::vector<BarLayout> leftBars, rightBars;
+        ComputeBarLayout(leftRect, Data, 0, m_PeakYLeft, m_AutoGainCeilingDbLeft, true, leftBars);
+        ComputeBarLayout(rightRect, Data, 1, m_PeakYRight, m_AutoGainCeilingDbRight, false, rightBars);
+
+        bars.reserve(leftBars.size() + rightBars.size());
+        bars.insert(bars.end(), leftBars.begin(), leftBars.end());
+        bars.insert(bars.end(), rightBars.begin(), rightBars.end());
+    }
+    else
+    {
+        ComputeBarLayout(barArea, Data, -1, m_PeakYLeft, m_AutoGainCeilingDbLeft, true, bars);
+    }
 
     // Grid needs each bar's current top *before* it draws, so it can skip
     // every pixel below that top for that bar's column - LED segment gaps
@@ -435,13 +475,15 @@ void CVisualization::LogDebugSample(int firstIdx, float firstRaw, float firstDb,
     AppendDebugLog(line);
 }
 
-void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* data, std::vector<BarLayout>& out)
+void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* data, int spectrumChannel,
+                                       std::vector<float>& peakState, std::vector<float>& autoGainState,
+                                       bool emitDebugLog, std::vector<BarLayout>& out)
 {
     const int n = std::clamp(g_Settings.barCount, 8, 128);
-    if ((int)m_PeakY.size() != n)
-        m_PeakY.assign(n, (float)area.bottom);
-    if ((int)m_AutoGainCeilingDb.size() != n)
-        m_AutoGainCeilingDb.assign(n, (float)g_Settings.dbCeiling);
+    if ((int)peakState.size() != n)
+        peakState.assign(n, (float)area.bottom);
+    if ((int)autoGainState.size() != n)
+        autoGainState.assign(n, (float)g_Settings.dbCeiling);
 
     out.clear();
     out.reserve(n);
@@ -505,14 +547,21 @@ void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* d
         // by any reference code, and empirically runs far hotter than a
         // real magnitude should (bars stayed pinned even at a -20dB
         // ceiling) - almost certainly a raw L+R sum rather than a properly
-        // scaled mono value. Average the two documented channels instead.
+        // scaled mono value. Mono mode averages the two documented
+        // channels; Stereo mode reads the caller's single requested
+        // channel so each half genuinely reflects just that channel.
         float sum = 0.0f;
         for (int b = binStart; b < binEnd; ++b)
-            sum += 0.5f * (data->Spectrum[0][b] + data->Spectrum[1][b]);
+        {
+            if (spectrumChannel < 0)
+                sum += 0.5f * (data->Spectrum[0][b] + data->Spectrum[1][b]);
+            else
+                sum += data->Spectrum[spectrumChannel][b];
+        }
         float rawValue = sum / (float)(binEnd - binStart);
         float rawDb = LinearToDb(rawValue);
 
-        if (g_Settings.debugLogging)
+        if (emitDebugLog && g_Settings.debugLogging)
         {
             if (i == debugIdxFirst) { debugRawFirst = rawValue; debugDbFirst = rawDb; }
             if (i == debugIdxMid)   { debugRawMid = rawValue; debugDbMid = rawDb; }
@@ -522,8 +571,8 @@ void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* d
         float ceilingDb = (float)g_Settings.dbCeiling;
         if (g_Settings.autoGainCeiling && g_Settings.amplitudeScaling == AmplitudeScaling::Logarithmic)
         {
-            UpdateAutoGainCeiling(m_AutoGainCeilingDb[i], rawDb);
-            ceilingDb = m_AutoGainCeilingDb[i];
+            UpdateAutoGainCeiling(autoGainState[i], rawDb);
+            ceilingDb = autoGainState[i];
         }
 
         float value = NormalizeMagnitude(rawValue, ceilingDb);
@@ -540,7 +589,7 @@ void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* d
 
         // Peak marker: snaps up instantly to a louder bar, falls at the
         // configured speed otherwise (both in device pixels/frame).
-        float& peakY = m_PeakY[i];
+        float& peakY = peakState[i];
         float barTopY = (float)barRect.top;
         if (barTopY < peakY)
             peakY = barTopY;
@@ -552,7 +601,7 @@ void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* d
         x += barWidth + spacing;
     }
 
-    if (g_Settings.debugLogging)
+    if (emitDebugLog && g_Settings.debugLogging)
     {
         ULONGLONG now = GetTickCount64();
         if (now - m_LastDebugLogTick >= 1000)

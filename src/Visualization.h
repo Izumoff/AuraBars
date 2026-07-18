@@ -47,7 +47,15 @@ private:
 
     void DrawBackground(HDC dc, const RECT& area);
     COLORREF BackgroundColorAtY(int y, const RECT& area) const;
-    void ComputeBarLayout(const RECT& area, const TAIMPVisualData* data, std::vector<BarLayout>& out);
+    // spectrumChannel: -1 averages Spectrum[0]/[1] (Mono); 0 or 1 reads a
+    // single real channel (Stereo). peakState/autoGainState are the
+    // per-bar running state to read and update - Mono and Stereo-left
+    // share m_PeakYLeft/m_AutoGainCeilingDbLeft, Stereo-right uses its own
+    // pair, so switching channel modes or having differently-loud L/R
+    // content never cross-contaminates decay state between them.
+    void ComputeBarLayout(const RECT& area, const TAIMPVisualData* data, int spectrumChannel,
+                           std::vector<float>& peakState, std::vector<float>& autoGainState,
+                           bool emitDebugLog, std::vector<BarLayout>& out);
     void DrawGrid(HDC dc, const RECT& area, const std::vector<BarLayout>& bars);
     void DrawBarVisuals(HDC dc, const RECT& area, const std::vector<BarLayout>& bars);
     void DrawLedBar(HDC dc, const RECT& barRect, const RECT& area);
@@ -68,7 +76,11 @@ private:
     HBITMAP m_MemBitmap = nullptr;
     HBITMAP m_OldBitmap = nullptr;
 
-    std::vector<float> m_PeakY;             // absolute pixel Y (device coords) of each bar's peak marker
-    std::vector<float> m_AutoGainCeilingDb; // per-bar running adaptive ceiling (dB), fast attack / slow release
+    // Mono uses the "Left" pair as its one and only channel's state;
+    // Stereo uses both pairs independently for its two channel halves.
+    std::vector<float> m_PeakYLeft;             // absolute pixel Y (device coords) of each bar's peak marker
+    std::vector<float> m_AutoGainCeilingDbLeft; // per-bar running adaptive ceiling (dB), fast attack / slow release
+    std::vector<float> m_PeakYRight;
+    std::vector<float> m_AutoGainCeilingDbRight;
     ULONGLONG m_LastDebugLogTick = 0;       // GetTickCount64() at last debug-log write, for the 1/sec cadence
 };

@@ -32,6 +32,10 @@ namespace
     const wchar_t* kKeySegmentHeight         = L"AuraBars\\SegmentHeight";
     const wchar_t* kKeyTopMarginPercent      = L"AuraBars\\TopMarginPercent";
     const wchar_t* kKeyDebugLogging          = L"AuraBars\\DebugLogging";
+    const wchar_t* kKeyChannelMode           = L"AuraBars\\ChannelMode";
+    const wchar_t* kKeyChannelGap            = L"AuraBars\\ChannelGap";
+    const wchar_t* kKeyLeftMargin            = L"AuraBars\\LeftMargin";
+    const wchar_t* kKeyRightMargin           = L"AuraBars\\RightMargin";
 
     int ReadInt(IAIMPServiceConfig* cfg, const wchar_t* key, int def)
     {
@@ -82,6 +86,9 @@ void ClampSettings(AuraBarsSettings& s)
     s.topMarginPercent = std::clamp(s.topMarginPercent, 0, 30);
     s.gridLineSpacing = std::clamp(s.gridLineSpacing, 8, 100);
     s.gridLineOpacity = std::clamp(s.gridLineOpacity, 0, 100);
+    s.channelGap = std::clamp(s.channelGap, 0, 40);
+    s.leftMargin = std::clamp(s.leftMargin, 0, 100);
+    s.rightMargin = std::clamp(s.rightMargin, 0, 100);
 }
 
 void LoadSettings(IAIMPServiceConfig* cfg, AuraBarsSettings& s)
@@ -118,6 +125,10 @@ void LoadSettings(IAIMPServiceConfig* cfg, AuraBarsSettings& s)
     s.segmentHeight = ReadInt(cfg, kKeySegmentHeight, def.segmentHeight);
     s.topMarginPercent = ReadInt(cfg, kKeyTopMarginPercent, def.topMarginPercent);
     s.debugLogging = ReadInt(cfg, kKeyDebugLogging, def.debugLogging ? 1 : 0) != 0;
+    s.channelMode = (ChannelMode)ReadInt(cfg, kKeyChannelMode, (int)def.channelMode);
+    s.channelGap = ReadInt(cfg, kKeyChannelGap, def.channelGap);
+    s.leftMargin = ReadInt(cfg, kKeyLeftMargin, def.leftMargin);
+    s.rightMargin = ReadInt(cfg, kKeyRightMargin, def.rightMargin);
 
     ClampSettings(s);
 }
@@ -154,6 +165,10 @@ void SaveSettings(IAIMPServiceConfig* cfg, const AuraBarsSettings& s)
     WriteInt(cfg, kKeySegmentHeight, s.segmentHeight);
     WriteInt(cfg, kKeyTopMarginPercent, s.topMarginPercent);
     WriteInt(cfg, kKeyDebugLogging, s.debugLogging ? 1 : 0);
+    WriteInt(cfg, kKeyChannelMode, (int)s.channelMode);
+    WriteInt(cfg, kKeyChannelGap, s.channelGap);
+    WriteInt(cfg, kKeyLeftMargin, s.leftMargin);
+    WriteInt(cfg, kKeyRightMargin, s.rightMargin);
 
     cfg->FlushCache();
 }

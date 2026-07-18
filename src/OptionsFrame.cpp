@@ -92,6 +92,10 @@ namespace
 
     const int kTabLayout[] = {
         IDC_LBL_TOPMARGIN, IDC_TOPMARGIN_EDIT,
+        IDC_LBL_CHANNELMODE, IDC_CHANNELMODE_COMBO,
+        IDC_LBL_CHANNELGAP, IDC_CHANNELGAP_EDIT,
+        IDC_LBL_LEFTMARGIN, IDC_LEFTMARGIN_EDIT,
+        IDC_LBL_RIGHTMARGIN, IDC_RIGHTMARGIN_EDIT,
     };
 
     void ShowGroup(HWND dlg, const int* ids, size_t count, bool show)
@@ -338,6 +342,14 @@ void COptionsFrame::HandleCommand(WPARAM wParam, LPARAM lParam)
                 NotifyModified();
             return;
 
+        case IDC_CHANNELMODE_COMBO:
+            if (code == CBN_SELCHANGE)
+            {
+                UpdateEnabledStates();
+                NotifyModified();
+            }
+            return;
+
         case IDC_GRIDLINES_CHECK:
         case IDC_PEAKMARKERS_CHECK:
         case IDC_DEBUGLOG_CHECK:
@@ -357,6 +369,9 @@ void COptionsFrame::HandleCommand(WPARAM wParam, LPARAM lParam)
         case IDC_SEGMENTHEIGHT_EDIT:
         case IDC_GRIDSPACING_EDIT:
         case IDC_GRIDOPACITY_EDIT:
+        case IDC_CHANNELGAP_EDIT:
+        case IDC_LEFTMARGIN_EDIT:
+        case IDC_RIGHTMARGIN_EDIT:
             if (code == EN_CHANGE)
                 NotifyModified();
             return;
@@ -399,6 +414,7 @@ void COptionsFrame::PopulateControls()
     SetComboItems2(m_hDlg, IDC_BARCOLORMODE_COMBO, L"Solid", L"Gradient", (int)m_Working.barColorMode);
     SetComboItems2(m_hDlg, IDC_BACKSTYLE_COMBO, L"Flat", L"Gradient", (int)m_Working.backgroundStyle);
     SetComboItems2(m_hDlg, IDC_GRIDSTYLE_COMBO, L"Dashed", L"Solid", (int)m_Working.gridLineStyle);
+    SetComboItems2(m_hDlg, IDC_CHANNELMODE_COMBO, L"Mono", L"Stereo", (int)m_Working.channelMode);
 
     SetButtonColorText(m_hDlg, IDC_BARCOLOR_BTN, m_Working.barColorSolid);
     SetButtonColorText(m_hDlg, IDC_BARGRADTOP_BTN, m_Working.barGradientTop);
@@ -420,6 +436,9 @@ void COptionsFrame::PopulateControls()
     SetDlgItemInt(m_hDlg, IDC_TOPMARGIN_EDIT, m_Working.topMarginPercent, FALSE);
     SetDlgItemInt(m_hDlg, IDC_SEGMENTGAP_EDIT, m_Working.segmentGap, FALSE);
     SetDlgItemInt(m_hDlg, IDC_SEGMENTHEIGHT_EDIT, m_Working.segmentHeight, FALSE);
+    SetDlgItemInt(m_hDlg, IDC_CHANNELGAP_EDIT, m_Working.channelGap, FALSE);
+    SetDlgItemInt(m_hDlg, IDC_LEFTMARGIN_EDIT, m_Working.leftMargin, FALSE);
+    SetDlgItemInt(m_hDlg, IDC_RIGHTMARGIN_EDIT, m_Working.rightMargin, FALSE);
 
     UpdateEnabledStates();
 }
@@ -435,6 +454,7 @@ void COptionsFrame::ReadControlsIntoWorking()
     m_Working.barColorMode = (ColorMode)SendMessageW(GetDlgItem(m_hDlg, IDC_BARCOLORMODE_COMBO), CB_GETCURSEL, 0, 0);
     m_Working.backgroundStyle = (BackgroundStyle)SendMessageW(GetDlgItem(m_hDlg, IDC_BACKSTYLE_COMBO), CB_GETCURSEL, 0, 0);
     m_Working.gridLineStyle = (GridLineStyle)SendMessageW(GetDlgItem(m_hDlg, IDC_GRIDSTYLE_COMBO), CB_GETCURSEL, 0, 0);
+    m_Working.channelMode = (ChannelMode)SendMessageW(GetDlgItem(m_hDlg, IDC_CHANNELMODE_COMBO), CB_GETCURSEL, 0, 0);
 
     m_Working.gridLines = IsDlgButtonChecked(m_hDlg, IDC_GRIDLINES_CHECK) == BST_CHECKED;
     m_Working.peakMarkers = IsDlgButtonChecked(m_hDlg, IDC_PEAKMARKERS_CHECK) == BST_CHECKED;
@@ -449,6 +469,9 @@ void COptionsFrame::ReadControlsIntoWorking()
     m_Working.segmentHeight = GetDlgItemInt(m_hDlg, IDC_SEGMENTHEIGHT_EDIT, nullptr, FALSE);
     m_Working.gridLineSpacing = GetDlgItemInt(m_hDlg, IDC_GRIDSPACING_EDIT, nullptr, FALSE);
     m_Working.gridLineOpacity = GetDlgItemInt(m_hDlg, IDC_GRIDOPACITY_EDIT, nullptr, FALSE);
+    m_Working.channelGap = GetDlgItemInt(m_hDlg, IDC_CHANNELGAP_EDIT, nullptr, FALSE);
+    m_Working.leftMargin = GetDlgItemInt(m_hDlg, IDC_LEFTMARGIN_EDIT, nullptr, FALSE);
+    m_Working.rightMargin = GetDlgItemInt(m_hDlg, IDC_RIGHTMARGIN_EDIT, nullptr, FALSE);
 
     // Colors are already current in m_Working; PickColor() updates it live.
 }
@@ -459,6 +482,7 @@ void COptionsFrame::UpdateEnabledStates()
     bool isGradient = SendMessageW(GetDlgItem(m_hDlg, IDC_BARCOLORMODE_COMBO), CB_GETCURSEL, 0, 0) == 1;
     bool isLogarithmic = SendMessageW(GetDlgItem(m_hDlg, IDC_AMPSCALE_COMBO), CB_GETCURSEL, 0, 0) == 1;
     bool autoGain = IsDlgButtonChecked(m_hDlg, IDC_AUTOGAIN_CHECK) == BST_CHECKED;
+    bool isStereo = SendMessageW(GetDlgItem(m_hDlg, IDC_CHANNELMODE_COMBO), CB_GETCURSEL, 0, 0) == 1;
 
     EnableWindow(GetDlgItem(m_hDlg, IDC_DBFLOOR_EDIT), isLogarithmic);
     EnableWindow(GetDlgItem(m_hDlg, IDC_LBL_DBFLOOR), isLogarithmic);
@@ -481,6 +505,9 @@ void COptionsFrame::UpdateEnabledStates()
     EnableWindow(GetDlgItem(m_hDlg, IDC_LBL_SEGMENTGAP), isLed);
     EnableWindow(GetDlgItem(m_hDlg, IDC_SEGMENTHEIGHT_EDIT), isLed);
     EnableWindow(GetDlgItem(m_hDlg, IDC_LBL_SEGMENTHEIGHT), isLed);
+
+    EnableWindow(GetDlgItem(m_hDlg, IDC_CHANNELGAP_EDIT), isStereo);
+    EnableWindow(GetDlgItem(m_hDlg, IDC_LBL_CHANNELGAP), isStereo);
 }
 
 void COptionsFrame::ResetToDefaults()
