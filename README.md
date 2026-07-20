@@ -8,22 +8,24 @@ Native C++ spectrum-bar visualization plugin for AIMP (x86 + x64), implementing 
 
 - LED (segmented) / Smooth bar rendering
 - Solid / gradient bar color
+- Bar smoothing: attack/decay filter applied to raw magnitude before amplitude scaling, so both bar height and peak markers respond smoothly instead of jittering frame-to-frame
 - Flat / gradient background
-- Grid lines: on/off, spacing, opacity, style (Dashed/Solid)
-- Peak markers (fall speed, thickness/segment height)
+- Grid lines: on/off, color, spacing, opacity, style (Dashed/Solid)
+- Peak markers: color, fall speed, thickness (Smooth style) / height in segments (LED style)
 - Linear / logarithmic (dB) amplitude scaling, configurable floor/ceiling, logarithmic bin-to-bar grouping
-- Auto-gain ceiling override
-- Mono (combined) or Stereo (side-by-side L/R) channel mode, with independent channel gap
+- Auto-gain ceiling override (adaptive per-bar ceiling, fast attack / slow release)
+- Mono (combined) or Stereo (side-by-side L/R) channel mode
 - Configurable bar count, spacing, segment gap/height
-- Left/Right/Top margin
-- Tabbed settings dialog: System, Scaling, Bars, Peaks, Background, Layout
+- Top/Bottom/Left/Right margins (px)
+- Border (enabled, color, thickness) and, in Stereo mode, a separator between channels (enabled, color, thickness)
+- Settings dialog built on AIMP's native UI control framework (`IAIMPUIForm`/`IAIMPUIControl`), so it follows the active AIMP skin instead of default Win32 styling; tabbed (System, Scaling, Bars, Peaks, Background, Layout) with grouped, aligned controls
 - Settings persisted via `IAIMPServiceConfig`
 - Double-buffered GDI rendering
-- Debug logging (once/sec: raw magnitude + dB for bar1/mid/last bar → `%TEMP%\AuraBars_debug.log`)
+- Debug logging (once/sec: raw magnitude + dB for the first/middle/last bar → `%TEMP%\AuraBars_debug.log`)
 
 ## Build
 
-MSVC (x86 + x64), `vcvarsall.bat` environment required per architecture. `build.bat` → `build/x86/AuraBars.dll` and `build/x64/AuraBars.dll`. `package.bat` assembles both into `AuraBars.aimppack`, along with `AuraBars.txt` (name/version/author/topic/description metadata, version auto-stamped per build) and the hand-maintained `ReadMe.txt`.
+MSVC (x86 + x64), `vcvarsall.bat` environment required per architecture. `build.bat` → `build/x86/AuraBars.dll` and `build/x64/AuraBars.dll` (both named `AuraBars.dll`, distinguished only by folder). `package.bat` assembles both into `AuraBars.aimppack`, along with `AuraBars.txt` (name/version/author/topic/description metadata, version auto-stamped per build) and the hand-maintained `ReadMe.txt`. Version number lives in exactly one place, `src/Version.h`, plus an auto-generated `src/BuildNumber.h` — both the System tab's version display and `AuraBars.txt` read from there, so they can never drift apart.
 
 ## Install
 
@@ -34,8 +36,4 @@ MSVC (x86 + x64), `vcvarsall.bat` environment required per architecture. `build.
 ## TODO
 
 - About tab in settings dialog
-- Bottom margin setting
-- Border and padding
 - Bottom panel
-- Dark theme support in settings dialog
-

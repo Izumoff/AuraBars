@@ -57,6 +57,16 @@ namespace
 
     const float kSilenceFloorDb = -120.0f; // avoids log10(0) = -inf
 
+    // Fixed clearance between a peak marker and the top of the drawable
+    // area, so a maxed-out bar's marker never renders flush against (or
+    // behind) the top border. Applied both to the raw peakY state (matters
+    // for Smooth style, which uses it directly) and, decisively, to
+    // DrawPeakMarker's final rect (matters for LED style, whose marker
+    // rect is re-derived from the segment grid and can land back at
+    // area.top regardless of the raw peakY clamp, depending on how the
+    // panel height happens to divide by the segment step).
+    const float kPeakTopClearancePx = 2.0f;
+
     // AIMP's raw Spectrum[] magnitudes are not normalized to 0.0-1.0 (the
     // SDK's own demos multiply them straight against pixel dimensions with
     // no scaling at all, so they only look right by accident whenever a
@@ -692,7 +702,14 @@ void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* d
 
         float value = NormalizeMagnitude(scalingInput, ceilingDb);
 
+        // Capped by the same top clearance as the peak marker below - a
+        // bar left free to reach area.top exactly would put its own top
+        // closer to the border than the peak's clamped floor, forcing the
+        // peak numerically below the bar (reintroducing the "bar taller
+        // than its own peak marker" bug) on every near-maxed frame. Capping
+        // both by the same margin keeps them consistent instead of fighting.
         int barHeightPx = (int)std::lround(value * totalHeight);
+        barHeightPx = std::clamp(barHeightPx, 0, (int)std::max(0.0f, totalHeight - kPeakTopClearancePx));
 
         int barWidth = std::max(1, widthBoundary(i + 1) - widthBoundary(i));
 
@@ -703,13 +720,21 @@ void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* d
         barRect.top = area.bottom - barHeightPx;
 
         // Peak marker: snaps up instantly to a louder bar, falls at the
-        // configured speed otherwise (both in device pixels/frame).
+        // configured speed otherwise (both in device pixels/frame). The
+        // decay step is clamped to the current frame's own barTopY (not
+        // just area.bottom) - without that clamp, a bar rising toward an
+        // still-decaying peak faster than the peak falls could leave the
+        // decayed peak numerically past (i.e. visually below) the bar's
+        // current top for that one frame, which reads as the bar
+        // rendering taller than its own peak marker.
         float& peakY = peakState[i];
         float barTopY = (float)barRect.top;
         if (barTopY < peakY)
             peakY = barTopY;
         else
-            peakY = std::min((float)area.bottom, peakY + (float)g_Settings.peakFallSpeed);
+            peakY = std::min(peakY + (float)g_Settings.peakFallSpeed, barTopY);
+
+        peakY = std::max(peakY, (float)area.top + kPeakTopClearancePx);
 
         out.push_back({ barRect, rawValue, rawDb, peakY });
 
@@ -819,7 +844,21 @@ void CVisualization::DrawPeakMarker(HDC dc, const RECT& barRect, const RECT& are
         r.top = r.bottom - markerHeight;
     }
 
-    r.top = std::max(r.top, area.top);
+    // The decisive clamp: LED's r.top/r.bottom above come from segment-grid
+    // snapping anchored to area.bottom, not from peakTopY directly, so for
+    // a maxed bar the whole rect can land above the clearance line - both
+    // edges, not just the top. Clamping only r.top in that case would
+    // crush the rect to zero height (r.top pushed down to/past r.bottom)
+    // and the marker would silently vanish instead of shrinking. Shifting
+    // the whole rect down instead preserves its height and guarantees the
+    // clearance regardless of panel height or bar style.
+    const int clearanceTop = area.top + (int)std::lround(kPeakTopClearancePx);
+    if (r.top < clearanceTop)
+    {
+        int shift = clearanceTop - r.top;
+        r.top += shift;
+        r.bottom += shift;
+    }
     r.bottom = std::min(r.bottom, area.bottom);
     if (r.top >= r.bottom)
         return;
