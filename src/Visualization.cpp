@@ -758,6 +758,9 @@ void CVisualization::DrawBarVisuals(HDC dc, const RECT& area, const std::vector<
 {
     for (const BarLayout& bar : bars)
     {
+        if (g_Settings.backgroundBarsEnabled)
+            DrawBackgroundBarLayer(dc, bar.rect, area);
+
         if (g_Settings.barStyle == BarStyle::LED)
             DrawLedBar(dc, bar.rect, area);
         else
@@ -765,6 +768,41 @@ void CVisualization::DrawBarVisuals(HDC dc, const RECT& area, const std::vector<
 
         if (g_Settings.peakMarkers)
             DrawPeakMarker(dc, bar.rect, area, bar.peakY);
+    }
+}
+
+void CVisualization::DrawBackgroundBarLayer(HDC dc, const RECT& barRect, const RECT& area)
+{
+    if (g_Settings.barStyle == BarStyle::LED)
+    {
+        // Same segment grid as DrawLedBar, just with no litTopThreshold -
+        // every segment top-to-bottom is drawn, representing the always-
+        // present "unlit" LEDs of a hardware meter.
+        const int segH = std::max(1, g_Settings.segmentHeight);
+        const int gap = std::max(0, g_Settings.segmentGap);
+        const int step = segH + gap;
+
+        for (int y = area.bottom; y > area.top; y -= step)
+        {
+            int segTop = std::max((int)area.top, y - segH);
+            RECT segRect = { barRect.left, segTop, barRect.right, y };
+
+            COLORREF color;
+            if (g_Settings.backgroundBarColorMode == ColorMode::Gradient)
+                color = ColorAtHeight(g_Settings.backgroundBarGradientTop, g_Settings.backgroundBarGradientBottom, segTop, area);
+            else
+                color = g_Settings.backgroundBarColorSolid;
+
+            FillSolid(dc, segRect, color);
+        }
+    }
+    else
+    {
+        RECT fullRect = { barRect.left, area.top, barRect.right, area.bottom };
+        if (g_Settings.backgroundBarColorMode == ColorMode::Gradient)
+            GradientFillVert(dc, fullRect, g_Settings.backgroundBarGradientTop, g_Settings.backgroundBarGradientBottom);
+        else
+            FillSolid(dc, fullRect, g_Settings.backgroundBarColorSolid);
     }
 }
 

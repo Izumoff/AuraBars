@@ -271,6 +271,9 @@ void WINAPI COptionsFrame::OnChanged(IUnknown* Sender)
     if (SenderIs(Sender, m_BarColorBtn))         { PickColor(m_BarColorBtn, m_Working.barColorSolid); return; }
     if (SenderIs(Sender, m_BarGradTopBtn))       { PickColor(m_BarGradTopBtn, m_Working.barGradientTop); return; }
     if (SenderIs(Sender, m_BarGradBottomBtn))    { PickColor(m_BarGradBottomBtn, m_Working.barGradientBottom); return; }
+    if (SenderIs(Sender, m_BackgroundBarColorBtn))     { PickColor(m_BackgroundBarColorBtn, m_Working.backgroundBarColorSolid); return; }
+    if (SenderIs(Sender, m_BackgroundBarGradTopBtn))   { PickColor(m_BackgroundBarGradTopBtn, m_Working.backgroundBarGradientTop); return; }
+    if (SenderIs(Sender, m_BackgroundBarGradBottomBtn)){ PickColor(m_BackgroundBarGradBottomBtn, m_Working.backgroundBarGradientBottom); return; }
     if (SenderIs(Sender, m_BackColorBtn))        { PickColor(m_BackColorBtn, m_Working.backgroundColor); return; }
     if (SenderIs(Sender, m_GridColorBtn))        { PickColor(m_GridColorBtn, m_Working.gridLineColor); return; }
     if (SenderIs(Sender, m_PeakColorBtn))        { PickColor(m_PeakColorBtn, m_Working.peakMarkerColor); return; }
@@ -280,7 +283,8 @@ void WINAPI COptionsFrame::OnChanged(IUnknown* Sender)
     // Combos/checkboxes that gate other controls' enabled state.
     if (SenderIs(Sender, m_BarStyleCombo) || SenderIs(Sender, m_BarColorModeCombo) ||
         SenderIs(Sender, m_AmpScaleCombo) || SenderIs(Sender, m_ChannelModeCombo) ||
-        SenderIs(Sender, m_AutoGainCheck) || SenderIs(Sender, m_BarSmoothingCheck))
+        SenderIs(Sender, m_AutoGainCheck) || SenderIs(Sender, m_BarSmoothingCheck) ||
+        SenderIs(Sender, m_BackgroundBarColorModeCombo))
     {
         UpdateEnabledStates();
         NotifyModified();
@@ -568,6 +572,24 @@ void COptionsFrame::BuildBackgroundTab(IAIMPUIWinControl* tab)
     m_GridOpacityEdit = CreateEdit(gridGroup, kFieldX, kGroupContentTop + 2 * kRowH, kFieldW, kFieldH);
     LabelRow(gridGroup, kGroupContentTop + 3 * kRowH, nestedIndent, L"Grid line style:");
     m_GridStyleCombo = CreateCombo(gridGroup, kFieldX, kGroupContentTop + 3 * kRowH, kFieldW, 60, L"Dashed", L"Solid");
+
+    int bgY = gridY + (kGroupContentTop + 4 * kRowH + kGroupContentBottom) + 10;
+    const int bgRows = 5;
+    IAIMPUIGroupBox* bgGroup = CreateGroupBox(tab, 10, bgY, groupW, kGroupContentTop + bgRows * kRowH + kGroupContentBottom, L"Background Bars");
+
+    m_BackgroundBarsCheck = CreateCheckBox(bgGroup, 10, kGroupContentTop, groupW - 20, 12, L"Background bars/LEDs");
+
+    m_BackgroundBarColorModeLabel = CreateLabel(bgGroup, 10, kGroupContentTop + kRowH, kFieldX - 20, 12, L"Background color mode:");
+    m_BackgroundBarColorModeCombo = CreateCombo(bgGroup, kFieldX, kGroupContentTop + kRowH, kFieldW, 60, L"Solid", L"Gradient");
+
+    m_BackgroundBarColorLabel = CreateLabel(bgGroup, 10, kGroupContentTop + 2 * kRowH, kFieldX - 20, 12, L"Background color:");
+    m_BackgroundBarColorBtn = CreateColorButton(bgGroup, kFieldX, kGroupContentTop + 2 * kRowH, kFieldW, kButtonH);
+
+    m_BackgroundBarGradTopLabel = CreateLabel(bgGroup, 10, kGroupContentTop + 3 * kRowH, kFieldX - 20, 12, L"Background gradient top:");
+    m_BackgroundBarGradTopBtn = CreateColorButton(bgGroup, kFieldX, kGroupContentTop + 3 * kRowH, kFieldW, kButtonH);
+
+    m_BackgroundBarGradBottomLabel = CreateLabel(bgGroup, 10, kGroupContentTop + 4 * kRowH, kFieldX - 20, 12, L"Background gradient bottom:");
+    m_BackgroundBarGradBottomBtn = CreateColorButton(bgGroup, kFieldX, kGroupContentTop + 4 * kRowH, kFieldW, kButtonH);
 }
 
 void COptionsFrame::BuildLayoutTab(IAIMPUIWinControl* tab)
@@ -625,6 +647,7 @@ void COptionsFrame::PopulateControls()
 
     SetComboIndex(m_BarStyleCombo, (int)m_Working.barStyle);
     SetComboIndex(m_BarColorModeCombo, (int)m_Working.barColorMode);
+    SetComboIndex(m_BackgroundBarColorModeCombo, (int)m_Working.backgroundBarColorMode);
     SetComboIndex(m_BackStyleCombo, (int)m_Working.backgroundStyle);
     SetComboIndex(m_GridStyleCombo, (int)m_Working.gridLineStyle);
     SetComboIndex(m_ChannelModeCombo, (int)m_Working.channelMode);
@@ -632,6 +655,9 @@ void COptionsFrame::PopulateControls()
     SetButtonColorText(m_BarColorBtn, m_Working.barColorSolid);
     SetButtonColorText(m_BarGradTopBtn, m_Working.barGradientTop);
     SetButtonColorText(m_BarGradBottomBtn, m_Working.barGradientBottom);
+    SetButtonColorText(m_BackgroundBarColorBtn, m_Working.backgroundBarColorSolid);
+    SetButtonColorText(m_BackgroundBarGradTopBtn, m_Working.backgroundBarGradientTop);
+    SetButtonColorText(m_BackgroundBarGradBottomBtn, m_Working.backgroundBarGradientBottom);
     SetButtonColorText(m_BackColorBtn, m_Working.backgroundColor);
     SetButtonColorText(m_GridColorBtn, m_Working.gridLineColor);
     SetButtonColorText(m_PeakColorBtn, m_Working.peakMarkerColor);
@@ -639,6 +665,7 @@ void COptionsFrame::PopulateControls()
     SetButtonColorText(m_SeparatorColorBtn, m_Working.separatorColor);
 
     SetCheckState(m_GridLinesCheck, m_Working.gridLines);
+    SetCheckState(m_BackgroundBarsCheck, m_Working.backgroundBarsEnabled);
     SetEditInt(m_GridSpacingEdit, m_Working.gridLineSpacing);
     SetEditInt(m_GridOpacityEdit, m_Working.gridLineOpacity);
     SetCheckState(m_PeakMarkersCheck, m_Working.peakMarkers);
@@ -674,11 +701,13 @@ void COptionsFrame::ReadControlsIntoWorking()
     m_Working.barSmoothingDecay = GetEditFloat(m_BarSmoothingDecayEdit, m_Working.barSmoothingDecay);
     m_Working.barStyle = (BarStyle)GetComboIndex(m_BarStyleCombo, (int)m_Working.barStyle);
     m_Working.barColorMode = (ColorMode)GetComboIndex(m_BarColorModeCombo, (int)m_Working.barColorMode);
+    m_Working.backgroundBarColorMode = (ColorMode)GetComboIndex(m_BackgroundBarColorModeCombo, (int)m_Working.backgroundBarColorMode);
     m_Working.backgroundStyle = (BackgroundStyle)GetComboIndex(m_BackStyleCombo, (int)m_Working.backgroundStyle);
     m_Working.gridLineStyle = (GridLineStyle)GetComboIndex(m_GridStyleCombo, (int)m_Working.gridLineStyle);
     m_Working.channelMode = (ChannelMode)GetComboIndex(m_ChannelModeCombo, (int)m_Working.channelMode);
 
     m_Working.gridLines = GetCheckState(m_GridLinesCheck);
+    m_Working.backgroundBarsEnabled = GetCheckState(m_BackgroundBarsCheck);
     m_Working.peakMarkers = GetCheckState(m_PeakMarkersCheck);
     m_Working.debugLogging = GetCheckState(m_DebugLogCheck);
     m_Working.borderEnabled = GetCheckState(m_BorderEnabledCheck);
@@ -728,6 +757,14 @@ void COptionsFrame::UpdateEnabledStates()
     SetEnabled(m_BarGradTopLabel, isGradient);
     SetEnabled(m_BarGradBottomBtn, isGradient);
     SetEnabled(m_BarGradBottomLabel, isGradient);
+
+    bool isBackgroundGradient = GetComboIndex(m_BackgroundBarColorModeCombo, 0) == 1;
+    SetEnabled(m_BackgroundBarColorBtn, !isBackgroundGradient);
+    SetEnabled(m_BackgroundBarColorLabel, !isBackgroundGradient);
+    SetEnabled(m_BackgroundBarGradTopBtn, isBackgroundGradient);
+    SetEnabled(m_BackgroundBarGradTopLabel, isBackgroundGradient);
+    SetEnabled(m_BackgroundBarGradBottomBtn, isBackgroundGradient);
+    SetEnabled(m_BackgroundBarGradBottomLabel, isBackgroundGradient);
 
     SetEnabled(m_PeakThicknessEdit, !isLed);
     SetEnabled(m_PeakThicknessLabel, !isLed);

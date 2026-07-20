@@ -121,6 +121,15 @@ private:
     IAIMPUIEdit* m_SegmentGapEdit = nullptr;
     IAIMPUILabel* m_SegmentHeightLabel = nullptr;
     IAIMPUIEdit* m_SegmentHeightEdit = nullptr;
+    IAIMPUICheckBox* m_BackgroundBarsCheck = nullptr;
+    IAIMPUILabel* m_BackgroundBarColorModeLabel = nullptr;
+    IAIMPUIComboBox* m_BackgroundBarColorModeCombo = nullptr;
+    IAIMPUILabel* m_BackgroundBarColorLabel = nullptr;
+    IAIMPUIButton* m_BackgroundBarColorBtn = nullptr;
+    IAIMPUILabel* m_BackgroundBarGradTopLabel = nullptr;
+    IAIMPUIButton* m_BackgroundBarGradTopBtn = nullptr;
+    IAIMPUILabel* m_BackgroundBarGradBottomLabel = nullptr;
+    IAIMPUIButton* m_BackgroundBarGradBottomBtn = nullptr;
 
     // Peaks tab
     IAIMPUICheckBox* m_PeakMarkersCheck = nullptr;

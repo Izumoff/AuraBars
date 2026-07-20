@@ -7,7 +7,7 @@
 // parses the "#define AURABARS_VERSION_STRING" line below to stamp
 // ReadMe.txt) read this exact file, so the two can never drift apart -
 // change the version in this one place only.
-#define AURABARS_VERSION_STRING "2.0"
+#define AURABARS_VERSION_STRING "2.1"
 
 // Full displayed version is base version + build number (e.g. "1.1.202607171534"),
 // so two builds from the same base version are still distinguishable.

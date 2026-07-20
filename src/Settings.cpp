@@ -33,6 +33,11 @@ namespace
     const wchar_t* kKeyBarSpacing            = L"AuraBars\\BarSpacing";
     const wchar_t* kKeySegmentGap            = L"AuraBars\\SegmentGap";
     const wchar_t* kKeySegmentHeight         = L"AuraBars\\SegmentHeight";
+    const wchar_t* kKeyBackgroundBarsEnabled     = L"AuraBars\\BackgroundBarsEnabled";
+    const wchar_t* kKeyBackgroundBarColorMode    = L"AuraBars\\BackgroundBarColorMode";
+    const wchar_t* kKeyBackgroundBarColorSolid   = L"AuraBars\\BackgroundBarColorSolid";
+    const wchar_t* kKeyBackgroundBarGradientTop  = L"AuraBars\\BackgroundBarGradientTop";
+    const wchar_t* kKeyBackgroundBarGradientBottom = L"AuraBars\\BackgroundBarGradientBottom";
     // New key name (not the old "TopMarginPercent") is deliberate: old
     // percent-based saved values must NOT be migrated/reinterpreted as
     // pixels, so this key is simply absent in any pre-existing config,
@@ -143,6 +148,11 @@ void LoadSettings(IAIMPServiceConfig* cfg, AuraBarsSettings& s)
     s.barSpacing = ReadInt(cfg, kKeyBarSpacing, def.barSpacing);
     s.segmentGap = ReadInt(cfg, kKeySegmentGap, def.segmentGap);
     s.segmentHeight = ReadInt(cfg, kKeySegmentHeight, def.segmentHeight);
+    s.backgroundBarsEnabled = ReadInt(cfg, kKeyBackgroundBarsEnabled, def.backgroundBarsEnabled ? 1 : 0) != 0;
+    s.backgroundBarColorMode = (ColorMode)ReadInt(cfg, kKeyBackgroundBarColorMode, (int)def.backgroundBarColorMode);
+    s.backgroundBarColorSolid = (COLORREF)ReadInt(cfg, kKeyBackgroundBarColorSolid, (int)def.backgroundBarColorSolid);
+    s.backgroundBarGradientTop = (COLORREF)ReadInt(cfg, kKeyBackgroundBarGradientTop, (int)def.backgroundBarGradientTop);
+    s.backgroundBarGradientBottom = (COLORREF)ReadInt(cfg, kKeyBackgroundBarGradientBottom, (int)def.backgroundBarGradientBottom);
     s.topMargin = ReadInt(cfg, kKeyTopMargin, def.topMargin);
     s.bottomMargin = ReadInt(cfg, kKeyBottomMargin, def.bottomMargin);
     s.debugLogging = ReadInt(cfg, kKeyDebugLogging, def.debugLogging ? 1 : 0) != 0;
@@ -192,6 +202,11 @@ void SaveSettings(IAIMPServiceConfig* cfg, const AuraBarsSettings& s)
     WriteInt(cfg, kKeyBarSpacing, s.barSpacing);
     WriteInt(cfg, kKeySegmentGap, s.segmentGap);
     WriteInt(cfg, kKeySegmentHeight, s.segmentHeight);
+    WriteInt(cfg, kKeyBackgroundBarsEnabled, s.backgroundBarsEnabled ? 1 : 0);
+    WriteInt(cfg, kKeyBackgroundBarColorMode, (int)s.backgroundBarColorMode);
+    WriteInt(cfg, kKeyBackgroundBarColorSolid, (int)s.backgroundBarColorSolid);
+    WriteInt(cfg, kKeyBackgroundBarGradientTop, (int)s.backgroundBarGradientTop);
+    WriteInt(cfg, kKeyBackgroundBarGradientBottom, (int)s.backgroundBarGradientBottom);
     WriteInt(cfg, kKeyTopMargin, s.topMargin);
     WriteInt(cfg, kKeyBottomMargin, s.bottomMargin);
     WriteInt(cfg, kKeyDebugLogging, s.debugLogging ? 1 : 0);

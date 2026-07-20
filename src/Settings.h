@@ -39,6 +39,11 @@ struct AuraBarsSettings
     int barSpacing = 8;                                // px, 0-20
     int segmentGap = 2;                                // px, 1-8, LED only
     int segmentHeight = 4;                             // px, 4-20, LED only
+    bool backgroundBarsEnabled = false;                // always-full-height "unlit LED" layer drawn behind the front bar
+    ColorMode backgroundBarColorMode = ColorMode::Gradient;
+    COLORREF backgroundBarColorSolid = RGB(0x3A, 0x2A, 0x1A);
+    COLORREF backgroundBarGradientTop = RGB(0x4A, 0x3A, 0x22);
+    COLORREF backgroundBarGradientBottom = RGB(0x2A, 0x1A, 0x18);
     bool debugLogging = false;                         // once/sec, writes sample bars' raw+dB values to %TEMP%\AuraBars_debug.log
     ChannelMode channelMode = ChannelMode::Mono;
     int topMargin = 8;                                 // px, 0-100 (was percent-based; old saved value intentionally NOT migrated)

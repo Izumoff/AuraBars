@@ -64,6 +64,10 @@ private:
     // DrawBackground actually painted, independent of how narrow bounds is.
     void DrawGrid(HDC dc, const RECT& bounds, const RECT& backgroundRef, const std::vector<BarLayout>& bars);
     void DrawBarVisuals(HDC dc, const RECT& area, const std::vector<BarLayout>& bars);
+    // Always-full-height "unlit LED" layer, drawn before the front bar so
+    // the front's normal draw naturally covers everything below the
+    // current level, leaving this visible only above it.
+    void DrawBackgroundBarLayer(HDC dc, const RECT& barRect, const RECT& area);
     void DrawBorderFrame(HDC dc, const RECT& rect, COLORREF color, int thickness);
     void DrawLedBar(HDC dc, const RECT& barRect, const RECT& area);
     void DrawSmoothBar(HDC dc, const RECT& barRect, const RECT& area);
