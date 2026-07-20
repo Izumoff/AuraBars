@@ -56,7 +56,11 @@ private:
     void ComputeBarLayout(const RECT& area, const TAIMPVisualData* data, int spectrumChannel,
                            std::vector<float>& peakState, std::vector<float>& autoGainState,
                            bool emitDebugLog, std::vector<BarLayout>& out);
-    void DrawGrid(HDC dc, const RECT& area, const std::vector<BarLayout>& bars);
+    // bounds: the region grid lines are actually drawn/confined within
+    // (a channel's inner rect). backgroundRef: the full panel rect, used
+    // only so BackgroundColorAtY's gradient interpolation matches what
+    // DrawBackground actually painted, independent of how narrow bounds is.
+    void DrawGrid(HDC dc, const RECT& bounds, const RECT& backgroundRef, const std::vector<BarLayout>& bars);
     void DrawBarVisuals(HDC dc, const RECT& area, const std::vector<BarLayout>& bars);
     void DrawBorderFrame(HDC dc, const RECT& rect, COLORREF color, int thickness);
     void DrawLedBar(HDC dc, const RECT& barRect, const RECT& area);

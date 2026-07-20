@@ -16,6 +16,7 @@
 #include "apiVisuals.h"
 #include "apiOptions.h"
 #include "apiTypes.h"
+#include "apiGUI.h"
 
 // Set once by CPlugin::Initialize, used by helpers that need to reach the
 // core (creating IAIMPString instances, resolving services) from anywhere

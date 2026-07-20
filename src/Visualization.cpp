@@ -251,9 +251,9 @@ void WINAPI CVisualization::Draw(HCANVAS Canvas, PAIMPVisualData Data)
 
     DrawBackground(m_MemDC, area);
 
-    // Top/Bottom margin only shrink the vertical range bars scale against
-    // (and, below, what the border frames); background and grid still
-    // fill the whole panel.
+    // Background always fills the whole panel regardless of margins.
+    // Bars, peaks, and grid all live within the margined (and, below,
+    // border-inset) area computed next.
     const int topMargin = std::clamp(g_Settings.topMargin, 0, 100);
     const int bottomMargin = std::clamp(g_Settings.bottomMargin, 0, 100);
     const int leftMargin = std::clamp(g_Settings.leftMargin, 0, 100);
@@ -264,10 +264,29 @@ void WINAPI CVisualization::Draw(HCANVAS Canvas, PAIMPVisualData Data)
     if (vBottom < vTop)
         vBottom = vTop;
 
+    // Border is drawn as a frame growing inward from each channel's
+    // margin-computed rect (frameRect), so anything that also draws out to
+    // frameRect's own edges - bars, peaks, grid - would sit underneath the
+    // border strip, getting its bottom/top/sides covered. Bars/peaks/grid
+    // instead use frameRect inset by the border's thickness ("innerRect"),
+    // so the border frames them from just outside rather than overlapping
+    // them. When border is off there's nothing to avoid, so inset is 0 and
+    // innerRect == frameRect.
+    const int borderInset = g_Settings.borderEnabled ? std::clamp(g_Settings.borderThickness, 1, 10) : 0;
+    auto insetRect = [borderInset](const RECT& r) -> RECT
+    {
+        RECT result = { r.left + borderInset, r.top + borderInset, r.right - borderInset, r.bottom - borderInset };
+        if (result.right < result.left) result.right = result.left;
+        if (result.bottom < result.top) result.bottom = result.top;
+        return result;
+    };
+
     std::vector<BarLayout> bars;
-    std::vector<RECT> borderRects;   // 1 rect (Mono) or 2 rects (Stereo), each framed by Border
+    std::vector<RECT> borderRects;   // 1 rect (Mono) or 2 rects (Stereo); border is drawn along these, bars/grid live inside their inset
+    std::vector<RECT> innerRects;    // same count/order as borderRects; grid is bounded to these
     bool drawSeparator = false;
     RECT separatorRect{};
+    RECT innerVRange{};              // shared vertical bounds of the inner rect(s), for gradient reference
 
     if (g_Settings.channelMode == ChannelMode::Stereo)
     {
@@ -292,15 +311,20 @@ void WINAPI CVisualization::Draw(HCANVAS Canvas, PAIMPVisualData Data)
         if (rightRect.right < rightRect.left)
             rightRect.right = rightRect.left;
 
+        RECT leftInner = insetRect(leftRect);
+        RECT rightInner = insetRect(rightRect);
+
         std::vector<BarLayout> leftBars, rightBars;
-        ComputeBarLayout(leftRect, Data, 0, m_PeakYLeft, m_AutoGainCeilingDbLeft, true, leftBars);
-        ComputeBarLayout(rightRect, Data, 1, m_PeakYRight, m_AutoGainCeilingDbRight, false, rightBars);
+        ComputeBarLayout(leftInner, Data, 0, m_PeakYLeft, m_AutoGainCeilingDbLeft, true, leftBars);
+        ComputeBarLayout(rightInner, Data, 1, m_PeakYRight, m_AutoGainCeilingDbRight, false, rightBars);
 
         bars.reserve(leftBars.size() + rightBars.size());
         bars.insert(bars.end(), leftBars.begin(), leftBars.end());
         bars.insert(bars.end(), rightBars.begin(), rightBars.end());
 
         borderRects = { leftRect, rightRect };
+        innerRects = { leftInner, rightInner };
+        innerVRange = { area.left, leftInner.top, area.right, leftInner.bottom };
 
         if (g_Settings.separatorEnabled)
         {
@@ -316,22 +340,27 @@ void WINAPI CVisualization::Draw(HCANVAS Canvas, PAIMPVisualData Data)
         if (barArea.right < barArea.left)
             barArea.right = barArea.left;
 
-        ComputeBarLayout(barArea, Data, -1, m_PeakYLeft, m_AutoGainCeilingDbLeft, true, bars);
+        RECT inner = insetRect(barArea);
+        ComputeBarLayout(inner, Data, -1, m_PeakYLeft, m_AutoGainCeilingDbLeft, true, bars);
         borderRects = { barArea };
+        innerRects = { inner };
+        innerVRange = { area.left, inner.top, area.right, inner.bottom };
     }
-
-    // Shared vertical reference for gradient color mapping - in Stereo,
-    // both channels use the same top/bottom, only their x-ranges differ.
-    RECT vRange = { area.left, vTop, area.right, vBottom };
 
     // Grid needs each bar's current top *before* it draws, so it can skip
     // every pixel below that top for that bar's column - LED segment gaps
     // included, since that whole span visually belongs to the bar even
-    // where the bar itself doesn't paint every pixel of it.
+    // where the bar itself doesn't paint every pixel of it. Bounded to
+    // each channel's own inner rect (not the whole panel) so grid lines
+    // never spill into the margins, the border frame, or - in Stereo - the
+    // gap around the separator.
     if (g_Settings.gridLines)
-        DrawGrid(m_MemDC, area, bars);
+    {
+        for (const RECT& r : innerRects)
+            DrawGrid(m_MemDC, r, area, bars);
+    }
 
-    DrawBarVisuals(m_MemDC, vRange, bars);
+    DrawBarVisuals(m_MemDC, innerVRange, bars);
 
     // Separator and Border are decorative chrome, drawn last on top of
     // everything else so a loud bar reaching full height never occludes
@@ -375,7 +404,7 @@ COLORREF CVisualization::BackgroundColorAtY(int y, const RECT& area) const
     return ColorAtHeight(top, g_Settings.backgroundColor, y, area);
 }
 
-void CVisualization::DrawGrid(HDC dc, const RECT& area, const std::vector<BarLayout>& bars)
+void CVisualization::DrawGrid(HDC dc, const RECT& bounds, const RECT& backgroundRef, const std::vector<BarLayout>& bars)
 {
     const int spacingPx = std::clamp(g_Settings.gridLineSpacing, 8, 100);
     const double opacity = std::clamp(g_Settings.gridLineOpacity, 0, 100) / 100.0;
@@ -410,17 +439,17 @@ void CVisualization::DrawGrid(HDC dc, const RECT& area, const std::vector<BarLay
     const int kDashGap = 4;
     const int kDashCycle = kDashOn + kDashGap;
 
-    for (int y = area.top + spacingPx; y < area.bottom; y += spacingPx)
+    for (int y = bounds.top + spacingPx; y < bounds.bottom; y += spacingPx)
     {
-        COLORREF lineColor = BlendColor(BackgroundColorAtY(y, area), g_Settings.gridLineColor, opacity);
+        COLORREF lineColor = BlendColor(BackgroundColorAtY(y, backgroundRef), g_Settings.gridLineColor, opacity);
         HPEN pen = CreatePen(PS_SOLID, 1, lineColor);
         HPEN old = (HPEN)SelectObject(dc, pen);
 
         if (dashed)
         {
-            for (int x = area.left; x < area.right; x += kDashCycle)
+            for (int x = bounds.left; x < bounds.right; x += kDashCycle)
             {
-                int segEnd = std::min(x + kDashOn, (int)area.right);
+                int segEnd = std::min(x + kDashOn, (int)bounds.right);
                 if (isRowClear(y, x, segEnd))
                 {
                     MoveToEx(dc, x, y, nullptr);
@@ -433,7 +462,7 @@ void CVisualization::DrawGrid(HDC dc, const RECT& area, const std::vector<BarLay
             // A continuous solid stroke has no dash phase to protect, so
             // drawing it as several segments (skipping occupied columns)
             // is fine - no seam is visible between adjacent segments.
-            int cursorX = area.left;
+            int cursorX = bounds.left;
             for (const BarLayout& bar : bars)
             {
                 if (bar.rect.left > cursorX)
@@ -448,10 +477,10 @@ void CVisualization::DrawGrid(HDC dc, const RECT& area, const std::vector<BarLay
                 }
                 cursorX = bar.rect.right;
             }
-            if (cursorX < area.right)
+            if (cursorX < bounds.right)
             {
                 MoveToEx(dc, cursorX, y, nullptr);
-                LineTo(dc, area.right, y);
+                LineTo(dc, bounds.right, y);
             }
         }
 

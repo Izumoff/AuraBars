@@ -75,7 +75,11 @@ HRESULT WINAPI CPlugin::Initialize(IAIMPCore* Core)
     visualization->Release();
 
     COptionsFrame* optionsFrame = new COptionsFrame();
-    Core->RegisterExtension(IID_IAIMPServiceOptionsDialog, optionsFrame);
+    // COptionsFrame implements two IUnknown-derived interfaces
+    // (IAIMPOptionsDialogFrame and IAIMPUIChangeEvents), so an implicit
+    // upcast straight to IUnknown* is ambiguous - upcast through one
+    // specific interface first.
+    Core->RegisterExtension(IID_IAIMPServiceOptionsDialog, static_cast<IAIMPOptionsDialogFrame*>(optionsFrame));
     optionsFrame->Release();
 
     return S_OK;
