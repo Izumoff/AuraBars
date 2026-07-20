@@ -16,6 +16,9 @@ struct AuraBarsSettings
     double dbFloor = -40.0;                            // dB, -100.0 to -20.0, Logarithmic only
     double dbCeiling = 0.0;                            // dB, -20.0 to 0.0, Logarithmic only
     bool autoGainCeiling = false;                      // Logarithmic only; overrides dbCeiling with an adaptive value
+    bool barSmoothing = true;                          // smooths raw magnitude before the Linear/Log scaling branch
+    double barSmoothingAttack = 0.9;                   // 0.0-1.0, 1.0 = instant (no smoothing) on rising values
+    double barSmoothingDecay = 0.2;                    // 0.0-1.0, 1.0 = instant (no smoothing) on falling values
     BarStyle barStyle = BarStyle::LED;
     ColorMode barColorMode = ColorMode::Gradient;
     COLORREF barColorSolid = RGB(0x8C, 0x12, 0x00);

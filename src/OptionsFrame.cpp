@@ -280,7 +280,7 @@ void WINAPI COptionsFrame::OnChanged(IUnknown* Sender)
     // Combos/checkboxes that gate other controls' enabled state.
     if (SenderIs(Sender, m_BarStyleCombo) || SenderIs(Sender, m_BarColorModeCombo) ||
         SenderIs(Sender, m_AmpScaleCombo) || SenderIs(Sender, m_ChannelModeCombo) ||
-        SenderIs(Sender, m_AutoGainCheck))
+        SenderIs(Sender, m_AutoGainCheck) || SenderIs(Sender, m_BarSmoothingCheck))
     {
         UpdateEnabledStates();
         NotifyModified();
@@ -474,7 +474,19 @@ void COptionsFrame::BuildScalingTab(IAIMPUIWinControl* tab)
 
     m_AutoGainCheck = CreateCheckBox(group, 10, kGroupContentTop + 3 * kRowH, groupW - 20, 12, L"Auto-gain ceiling (overrides dB ceiling above)");
 
-    int barsY = 8 + (kGroupContentTop + rows * kRowH + kGroupContentBottom) + 10;
+    int smoothY = 8 + (kGroupContentTop + rows * kRowH + kGroupContentBottom) + 10;
+    const int smoothRows = 3;
+    IAIMPUIGroupBox* smoothGroup = CreateGroupBox(tab, 10, smoothY, groupW, kGroupContentTop + smoothRows * kRowH + kGroupContentBottom, L"Bar Smoothing");
+
+    m_BarSmoothingCheck = CreateCheckBox(smoothGroup, 10, kGroupContentTop, groupW - 20, 12, L"Bar smoothing");
+
+    m_BarSmoothingAttackLabel = CreateLabel(smoothGroup, 10, kGroupContentTop + kRowH, kFieldX - 20, 12, L"Attack (0.0-1.0):");
+    m_BarSmoothingAttackEdit = CreateEdit(smoothGroup, kFieldX, kGroupContentTop + kRowH, kFieldW, kFieldH);
+
+    m_BarSmoothingDecayLabel = CreateLabel(smoothGroup, 10, kGroupContentTop + 2 * kRowH, kFieldX - 20, 12, L"Decay (0.0-1.0):");
+    m_BarSmoothingDecayEdit = CreateEdit(smoothGroup, kFieldX, kGroupContentTop + 2 * kRowH, kFieldW, kFieldH);
+
+    int barsY = smoothY + (kGroupContentTop + smoothRows * kRowH + kGroupContentBottom) + 10;
     LabelRow(tab, barsY, 10, L"Number of bars (8-128):");
     m_BarCountEdit = CreateEdit(tab, kFieldX, barsY, kFieldW, kFieldH);
 }
@@ -607,6 +619,9 @@ void COptionsFrame::PopulateControls()
     SetEditFloat(m_DbFloorEdit, m_Working.dbFloor);
     SetEditFloat(m_DbCeilingEdit, m_Working.dbCeiling);
     SetCheckState(m_AutoGainCheck, m_Working.autoGainCeiling);
+    SetCheckState(m_BarSmoothingCheck, m_Working.barSmoothing);
+    SetEditFloat(m_BarSmoothingAttackEdit, m_Working.barSmoothingAttack);
+    SetEditFloat(m_BarSmoothingDecayEdit, m_Working.barSmoothingDecay);
 
     SetComboIndex(m_BarStyleCombo, (int)m_Working.barStyle);
     SetComboIndex(m_BarColorModeCombo, (int)m_Working.barColorMode);
@@ -654,6 +669,9 @@ void COptionsFrame::ReadControlsIntoWorking()
     m_Working.dbFloor = GetEditFloat(m_DbFloorEdit, m_Working.dbFloor);
     m_Working.dbCeiling = GetEditFloat(m_DbCeilingEdit, m_Working.dbCeiling);
     m_Working.autoGainCeiling = GetCheckState(m_AutoGainCheck);
+    m_Working.barSmoothing = GetCheckState(m_BarSmoothingCheck);
+    m_Working.barSmoothingAttack = GetEditFloat(m_BarSmoothingAttackEdit, m_Working.barSmoothingAttack);
+    m_Working.barSmoothingDecay = GetEditFloat(m_BarSmoothingDecayEdit, m_Working.barSmoothingDecay);
     m_Working.barStyle = (BarStyle)GetComboIndex(m_BarStyleCombo, (int)m_Working.barStyle);
     m_Working.barColorMode = (ColorMode)GetComboIndex(m_BarColorModeCombo, (int)m_Working.barColorMode);
     m_Working.backgroundStyle = (BackgroundStyle)GetComboIndex(m_BackStyleCombo, (int)m_Working.backgroundStyle);
@@ -697,6 +715,12 @@ void COptionsFrame::UpdateEnabledStates()
     SetEnabled(m_DbCeilingEdit, isLogarithmic && !autoGain);
     SetEnabled(m_DbCeilingLabel, isLogarithmic && !autoGain);
     SetEnabled(m_AutoGainCheck, isLogarithmic);
+
+    bool smoothingOn = GetCheckState(m_BarSmoothingCheck);
+    SetEnabled(m_BarSmoothingAttackEdit, smoothingOn);
+    SetEnabled(m_BarSmoothingAttackLabel, smoothingOn);
+    SetEnabled(m_BarSmoothingDecayEdit, smoothingOn);
+    SetEnabled(m_BarSmoothingDecayLabel, smoothingOn);
 
     SetEnabled(m_BarColorBtn, !isGradient);
     SetEnabled(m_BarColorLabel, !isGradient);

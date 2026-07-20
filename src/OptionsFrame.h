@@ -101,6 +101,11 @@ private:
     IAIMPUIEdit* m_DbCeilingEdit = nullptr;
     IAIMPUICheckBox* m_AutoGainCheck = nullptr;
     IAIMPUIEdit* m_BarCountEdit = nullptr;
+    IAIMPUICheckBox* m_BarSmoothingCheck = nullptr;
+    IAIMPUILabel* m_BarSmoothingAttackLabel = nullptr;
+    IAIMPUIEdit* m_BarSmoothingAttackEdit = nullptr;
+    IAIMPUILabel* m_BarSmoothingDecayLabel = nullptr;
+    IAIMPUIEdit* m_BarSmoothingDecayEdit = nullptr;
 
     // Bars tab
     IAIMPUIComboBox* m_BarStyleCombo = nullptr;

@@ -315,8 +315,8 @@ void WINAPI CVisualization::Draw(HCANVAS Canvas, PAIMPVisualData Data)
         RECT rightInner = insetRect(rightRect);
 
         std::vector<BarLayout> leftBars, rightBars;
-        ComputeBarLayout(leftInner, Data, 0, m_PeakYLeft, m_AutoGainCeilingDbLeft, true, leftBars);
-        ComputeBarLayout(rightInner, Data, 1, m_PeakYRight, m_AutoGainCeilingDbRight, false, rightBars);
+        ComputeBarLayout(leftInner, Data, 0, m_PeakYLeft, m_AutoGainCeilingDbLeft, m_SmoothedLeft, true, leftBars);
+        ComputeBarLayout(rightInner, Data, 1, m_PeakYRight, m_AutoGainCeilingDbRight, m_SmoothedRight, false, rightBars);
 
         bars.reserve(leftBars.size() + rightBars.size());
         bars.insert(bars.end(), leftBars.begin(), leftBars.end());
@@ -341,7 +341,7 @@ void WINAPI CVisualization::Draw(HCANVAS Canvas, PAIMPVisualData Data)
             barArea.right = barArea.left;
 
         RECT inner = insetRect(barArea);
-        ComputeBarLayout(inner, Data, -1, m_PeakYLeft, m_AutoGainCeilingDbLeft, true, bars);
+        ComputeBarLayout(inner, Data, -1, m_PeakYLeft, m_AutoGainCeilingDbLeft, m_SmoothedLeft, true, bars);
         borderRects = { barArea };
         innerRects = { inner };
         innerVRange = { area.left, inner.top, area.right, inner.bottom };
@@ -572,6 +572,7 @@ void CVisualization::LogDebugSample(int firstIdx, float firstRaw, float firstDb,
 
 void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* data, int spectrumChannel,
                                        std::vector<float>& peakState, std::vector<float>& autoGainState,
+                                       std::vector<float>& smoothedState,
                                        bool emitDebugLog, std::vector<BarLayout>& out)
 {
     const int n = std::clamp(g_Settings.barCount, 8, 128);
@@ -579,6 +580,8 @@ void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* d
         peakState.assign(n, (float)area.bottom);
     if ((int)autoGainState.size() != n)
         autoGainState.assign(n, (float)g_Settings.dbCeiling);
+    if ((int)smoothedState.size() != n)
+        smoothedState.assign(n, 0.0f);
 
     out.clear();
     out.reserve(n);
@@ -663,14 +666,31 @@ void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* d
             if (i == debugIdxLast)  { debugRawLast = rawValue; debugDbLast = rawDb; }
         }
 
+        // Bar smoothing sits before the Linear/Log scaling branch (and
+        // before auto-gain ceiling tracking, which feeds that same
+        // branch), so both scaling modes and the ceiling all see the same
+        // filtered value - the ceiling never hunts against raw transients
+        // while the bar height lags smoothly behind it. Peak markers track
+        // this for free: they're derived from the resulting scaled bar
+        // height below, not a separate raw-magnitude read.
+        float scalingInput = rawValue;
+        if (g_Settings.barSmoothing)
+        {
+            float& smoothed = smoothedState[i];
+            double rate = (rawValue >= smoothed) ? g_Settings.barSmoothingAttack : g_Settings.barSmoothingDecay;
+            smoothed += (float)rate * (rawValue - smoothed);
+            scalingInput = smoothed;
+        }
+        float scalingDb = LinearToDb(scalingInput);
+
         float ceilingDb = (float)g_Settings.dbCeiling;
         if (g_Settings.autoGainCeiling && g_Settings.amplitudeScaling == AmplitudeScaling::Logarithmic)
         {
-            UpdateAutoGainCeiling(autoGainState[i], rawDb);
+            UpdateAutoGainCeiling(autoGainState[i], scalingDb);
             ceilingDb = autoGainState[i];
         }
 
-        float value = NormalizeMagnitude(rawValue, ceilingDb);
+        float value = NormalizeMagnitude(scalingInput, ceilingDb);
 
         int barHeightPx = (int)std::lround(value * totalHeight);
 

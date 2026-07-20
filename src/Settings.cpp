@@ -10,6 +10,9 @@ namespace
     const wchar_t* kKeyDbFloor               = L"AuraBars\\DbFloor";
     const wchar_t* kKeyDbCeiling             = L"AuraBars\\DbCeiling";
     const wchar_t* kKeyAutoGainCeiling       = L"AuraBars\\AutoGainCeiling";
+    const wchar_t* kKeyBarSmoothing          = L"AuraBars\\BarSmoothing";
+    const wchar_t* kKeyBarSmoothingAttack    = L"AuraBars\\BarSmoothingAttack";
+    const wchar_t* kKeyBarSmoothingDecay     = L"AuraBars\\BarSmoothingDecay";
     const wchar_t* kKeyBarStyle              = L"AuraBars\\BarStyle";
     const wchar_t* kKeyBarColorMode          = L"AuraBars\\BarColorMode";
     const wchar_t* kKeyBarColorSolid         = L"AuraBars\\BarColorSolid";
@@ -87,6 +90,8 @@ void ClampSettings(AuraBarsSettings& s)
     s.dbCeiling = std::clamp(s.dbCeiling, -20.0, 0.0);
     if (s.dbCeiling <= s.dbFloor)
         s.dbCeiling = s.dbFloor + 1.0;
+    s.barSmoothingAttack = std::clamp(s.barSmoothingAttack, 0.0, 1.0);
+    s.barSmoothingDecay = std::clamp(s.barSmoothingDecay, 0.0, 1.0);
     s.peakFallSpeed = std::clamp(s.peakFallSpeed, 0.1, 10.0);
     s.peakMarkerThickness = std::clamp(s.peakMarkerThickness, 1, 10);
     s.peakMarkerHeightSegments = std::clamp(s.peakMarkerHeightSegments, 1, 3);
@@ -115,6 +120,9 @@ void LoadSettings(IAIMPServiceConfig* cfg, AuraBarsSettings& s)
     s.dbFloor = ReadFloat(cfg, kKeyDbFloor, def.dbFloor);
     s.dbCeiling = ReadFloat(cfg, kKeyDbCeiling, def.dbCeiling);
     s.autoGainCeiling = ReadInt(cfg, kKeyAutoGainCeiling, def.autoGainCeiling ? 1 : 0) != 0;
+    s.barSmoothing = ReadInt(cfg, kKeyBarSmoothing, def.barSmoothing ? 1 : 0) != 0;
+    s.barSmoothingAttack = ReadFloat(cfg, kKeyBarSmoothingAttack, def.barSmoothingAttack);
+    s.barSmoothingDecay = ReadFloat(cfg, kKeyBarSmoothingDecay, def.barSmoothingDecay);
     s.barStyle = (BarStyle)ReadInt(cfg, kKeyBarStyle, (int)def.barStyle);
     s.barColorMode = (ColorMode)ReadInt(cfg, kKeyBarColorMode, (int)def.barColorMode);
     s.barColorSolid = (COLORREF)ReadInt(cfg, kKeyBarColorSolid, (int)def.barColorSolid);
@@ -161,6 +169,9 @@ void SaveSettings(IAIMPServiceConfig* cfg, const AuraBarsSettings& s)
     WriteFloat(cfg, kKeyDbFloor, s.dbFloor);
     WriteFloat(cfg, kKeyDbCeiling, s.dbCeiling);
     WriteInt(cfg, kKeyAutoGainCeiling, s.autoGainCeiling ? 1 : 0);
+    WriteInt(cfg, kKeyBarSmoothing, s.barSmoothing ? 1 : 0);
+    WriteFloat(cfg, kKeyBarSmoothingAttack, s.barSmoothingAttack);
+    WriteFloat(cfg, kKeyBarSmoothingDecay, s.barSmoothingDecay);
     WriteInt(cfg, kKeyBarStyle, (int)s.barStyle);
     WriteInt(cfg, kKeyBarColorMode, (int)s.barColorMode);
     WriteInt(cfg, kKeyBarColorSolid, (int)s.barColorSolid);
