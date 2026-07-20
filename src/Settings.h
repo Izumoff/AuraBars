@@ -34,14 +34,20 @@ struct AuraBarsSettings
     int peakMarkerThickness = 3;                       // px, 1-10, Smooth only
     int peakMarkerHeightSegments = 1;                  // segments, 1-3, LED only
     int barSpacing = 8;                                // px, 0-20
-    int topMarginPercent = 0;                          // %, 0-30, headroom above bars
     int segmentGap = 2;                                // px, 1-8, LED only
     int segmentHeight = 4;                             // px, 4-20, LED only
     bool debugLogging = false;                         // once/sec, writes sample bars' raw+dB values to %TEMP%\AuraBars_debug.log
     ChannelMode channelMode = ChannelMode::Mono;
-    int channelGap = 8;                                // px, Stereo only, 0-40
-    int leftMargin = 0;                                // px, 0-100, outer margin (Mono: left edge of the spectrum; Stereo: left edge of the left channel)
-    int rightMargin = 0;                               // px, 0-100, outer margin (Mono: right edge of the spectrum; Stereo: right edge of the right channel)
+    int topMargin = 8;                                 // px, 0-100 (was percent-based; old saved value intentionally NOT migrated)
+    int bottomMargin = 8;                              // px, 0-100
+    int leftMargin = 8;                                // px, 0-100; Mono: left edge of the spectrum. Stereo: left edge of the Left channel, AND gap between the Left channel's right edge and the Separator
+    int rightMargin = 8;                               // px, 0-100; Mono: right edge of the spectrum. Stereo: gap between the Separator and the Right channel's left edge, AND right edge of the Right channel
+    bool borderEnabled = true;
+    COLORREF borderColor = RGB(0x30, 0x30, 0x30);
+    int borderThickness = 2;                           // px, 1-10
+    bool separatorEnabled = true;                       // Stereo mode only
+    COLORREF separatorColor = RGB(0xB0, 0x69, 0x1C);
+    int separatorThickness = 2;                        // px, 1-10
 };
 
 // Live settings shared by the visualization and the options dialog: the

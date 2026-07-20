@@ -58,6 +58,7 @@ private:
                            bool emitDebugLog, std::vector<BarLayout>& out);
     void DrawGrid(HDC dc, const RECT& area, const std::vector<BarLayout>& bars);
     void DrawBarVisuals(HDC dc, const RECT& area, const std::vector<BarLayout>& bars);
+    void DrawBorderFrame(HDC dc, const RECT& rect, COLORREF color, int thickness);
     void DrawLedBar(HDC dc, const RECT& barRect, const RECT& area);
     void DrawSmoothBar(HDC dc, const RECT& barRect, const RECT& area);
     void DrawPeakMarker(HDC dc, const RECT& barRect, const RECT& area, float peakTopY);

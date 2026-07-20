@@ -41,9 +41,15 @@
 #define IDC_GRIDOPACITY_EDIT            1034
 #define IDC_GRIDSTYLE_COMBO             1035
 #define IDC_CHANNELMODE_COMBO           1036
-#define IDC_CHANNELGAP_EDIT             1037
 #define IDC_LEFTMARGIN_EDIT             1038
 #define IDC_RIGHTMARGIN_EDIT            1039
+#define IDC_BOTTOMMARGIN_EDIT           1040
+#define IDC_BORDERENABLED_CHECK         1041
+#define IDC_BORDERCOLOR_BTN             1042
+#define IDC_BORDERTHICKNESS_EDIT        1043
+#define IDC_SEPARATORENABLED_CHECK      1044
+#define IDC_SEPARATORCOLOR_BTN          1045
+#define IDC_SEPARATORTHICKNESS_EDIT     1046
 
 #define IDC_LBL_BARGRADTOP              1101
 #define IDC_LBL_BARGRADBOTTOM           1102
@@ -67,8 +73,10 @@
 #define IDC_LBL_GRIDOPACITY             1122
 #define IDC_LBL_GRIDSTYLE               1123
 #define IDC_LBL_CHANNELMODE             1124
-#define IDC_LBL_CHANNELGAP              1125
 #define IDC_LBL_LEFTMARGIN              1126
 #define IDC_LBL_RIGHTMARGIN             1127
+#define IDC_LBL_BOTTOMMARGIN            1128
+#define IDC_LBL_BORDERTHICKNESS         1129
+#define IDC_LBL_SEPARATORTHICKNESS      1130
 
 #define IDC_STATIC                      -1

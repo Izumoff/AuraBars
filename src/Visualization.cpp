@@ -251,37 +251,46 @@ void WINAPI CVisualization::Draw(HCANVAS Canvas, PAIMPVisualData Data)
 
     DrawBackground(m_MemDC, area);
 
-    // Top margin only shrinks the range bar heights scale against, so a
-    // 100%-level bar stops short of the panel's top edge; background and
-    // grid lines still fill the whole panel. Left/right margin instead
-    // narrows the horizontal drawable range the bars themselves lay out
-    // within - background and grid still span the full panel width too,
-    // only the bars (and, in Stereo, the two-channel split within that
-    // narrowed range) respect it.
-    RECT barArea = area;
-    barArea.top += (LONG)std::lround((area.bottom - area.top) * (g_Settings.topMarginPercent / 100.0));
-    barArea.left += std::clamp(g_Settings.leftMargin, 0, 100);
-    barArea.right -= std::clamp(g_Settings.rightMargin, 0, 100);
-    if (barArea.right < barArea.left)
-        barArea.right = barArea.left;
+    // Top/Bottom margin only shrink the vertical range bars scale against
+    // (and, below, what the border frames); background and grid still
+    // fill the whole panel.
+    const int topMargin = std::clamp(g_Settings.topMargin, 0, 100);
+    const int bottomMargin = std::clamp(g_Settings.bottomMargin, 0, 100);
+    const int leftMargin = std::clamp(g_Settings.leftMargin, 0, 100);
+    const int rightMargin = std::clamp(g_Settings.rightMargin, 0, 100);
+
+    const int vTop = area.top + topMargin;
+    int vBottom = area.bottom - bottomMargin;
+    if (vBottom < vTop)
+        vBottom = vTop;
 
     std::vector<BarLayout> bars;
+    std::vector<RECT> borderRects;   // 1 rect (Mono) or 2 rects (Stereo), each framed by Border
+    bool drawSeparator = false;
+    RECT separatorRect{};
 
     if (g_Settings.channelMode == ChannelMode::Stereo)
     {
-        // Split the margined range into two independent channel halves
-        // separated by Channel gap - a setting distinct from, and applied
-        // on top of, the left/right margins above.
-        const int gap = std::clamp(g_Settings.channelGap, 0, 40);
-        const int totalAvail = std::max(0, (int)(barArea.right - barArea.left));
-        const int usable = std::max(0, totalAvail - gap);
-        const int leftWidth = usable / 2;
-        const int rightWidth = usable - leftWidth;
+        // Stereo's margin meaning is not a simple inset: Left margin is
+        // the gap on BOTH sides of the Left channel (window edge -> Left
+        // channel, AND Left channel -> Separator); Right margin is the
+        // gap on BOTH sides of the Right channel (Separator -> Right
+        // channel, AND Right channel -> window edge). This fully replaces
+        // the old Channel gap setting - the separator sits exactly in the
+        // space these margins imply, not a separately configured gap.
+        const int separatorW = std::clamp(g_Settings.separatorThickness, 1, 10);
+        const int totalWidth = std::max(0, (int)(area.right - area.left));
+        const int overhead = 2 * leftMargin + 2 * rightMargin + separatorW;
+        const int remaining = std::max(0, totalWidth - overhead);
+        const int leftWidth = remaining / 2;
+        const int rightWidth = remaining - leftWidth;
 
-        RECT leftRect = barArea;
-        leftRect.right = leftRect.left + leftWidth;
-        RECT rightRect = barArea;
-        rightRect.left = barArea.right - rightWidth;
+        RECT leftRect = { area.left + leftMargin, vTop, area.left + leftMargin + leftWidth, vBottom };
+        const int sepLeft = leftRect.right + leftMargin;
+        const int sepRight = sepLeft + separatorW;
+        RECT rightRect = { sepRight + rightMargin, vTop, area.right - rightMargin, vBottom };
+        if (rightRect.right < rightRect.left)
+            rightRect.right = rightRect.left;
 
         std::vector<BarLayout> leftBars, rightBars;
         ComputeBarLayout(leftRect, Data, 0, m_PeakYLeft, m_AutoGainCeilingDbLeft, true, leftBars);
@@ -290,11 +299,30 @@ void WINAPI CVisualization::Draw(HCANVAS Canvas, PAIMPVisualData Data)
         bars.reserve(leftBars.size() + rightBars.size());
         bars.insert(bars.end(), leftBars.begin(), leftBars.end());
         bars.insert(bars.end(), rightBars.begin(), rightBars.end());
+
+        borderRects = { leftRect, rightRect };
+
+        if (g_Settings.separatorEnabled)
+        {
+            drawSeparator = true;
+            // Full window height top-to-bottom - unlike the border
+            // rectangles, the separator ignores Top/Bottom margin entirely.
+            separatorRect = { sepLeft, area.top, sepRight, area.bottom };
+        }
     }
     else
     {
+        RECT barArea = { area.left + leftMargin, vTop, area.right - rightMargin, vBottom };
+        if (barArea.right < barArea.left)
+            barArea.right = barArea.left;
+
         ComputeBarLayout(barArea, Data, -1, m_PeakYLeft, m_AutoGainCeilingDbLeft, true, bars);
+        borderRects = { barArea };
     }
+
+    // Shared vertical reference for gradient color mapping - in Stereo,
+    // both channels use the same top/bottom, only their x-ranges differ.
+    RECT vRange = { area.left, vTop, area.right, vBottom };
 
     // Grid needs each bar's current top *before* it draws, so it can skip
     // every pixel below that top for that bar's column - LED segment gaps
@@ -303,7 +331,19 @@ void WINAPI CVisualization::Draw(HCANVAS Canvas, PAIMPVisualData Data)
     if (g_Settings.gridLines)
         DrawGrid(m_MemDC, area, bars);
 
-    DrawBarVisuals(m_MemDC, barArea, bars);
+    DrawBarVisuals(m_MemDC, vRange, bars);
+
+    // Separator and Border are decorative chrome, drawn last on top of
+    // everything else so a loud bar reaching full height never occludes
+    // them. Separator is independent of Border enabled/disabled.
+    if (drawSeparator)
+        FillSolid(m_MemDC, separatorRect, g_Settings.separatorColor);
+
+    if (g_Settings.borderEnabled)
+    {
+        for (const RECT& r : borderRects)
+            DrawBorderFrame(m_MemDC, r, g_Settings.borderColor, g_Settings.borderThickness);
+    }
 
     BitBlt(Canvas, 0, 0, m_Width, m_Height, m_MemDC, 0, 0, SRCCOPY);
 }
@@ -418,6 +458,32 @@ void CVisualization::DrawGrid(HDC dc, const RECT& area, const std::vector<BarLay
         SelectObject(dc, old);
         DeleteObject(pen);
     }
+}
+
+void CVisualization::DrawBorderFrame(HDC dc, const RECT& rect, COLORREF color, int thickness)
+{
+    int w = rect.right - rect.left;
+    int h = rect.bottom - rect.top;
+    if (w <= 0 || h <= 0)
+        return;
+
+    // Four filled edge strips rather than FrameRect: FrameRect's line
+    // width isn't reliably controllable to an exact pixel count, while
+    // strips give precise, symmetric thickness on all four sides. Clamped
+    // so a thick border on a tiny (e.g. heavily margined) rect can't turn
+    // into overlapping/inverted strips.
+    int t = std::clamp(thickness, 1, 10);
+    t = std::min(t, std::max(1, std::min(w, h) / 2));
+
+    RECT top = { rect.left, rect.top, rect.right, rect.top + t };
+    RECT bottom = { rect.left, rect.bottom - t, rect.right, rect.bottom };
+    RECT left = { rect.left, rect.top, rect.left + t, rect.bottom };
+    RECT right = { rect.right - t, rect.top, rect.right, rect.bottom };
+
+    FillSolid(dc, top, color);
+    FillSolid(dc, bottom, color);
+    FillSolid(dc, left, color);
+    FillSolid(dc, right, color);
 }
 
 COLORREF CVisualization::ColorAtHeight(COLORREF top, COLORREF bottom, int y, const RECT& area) const

@@ -30,12 +30,22 @@ namespace
     const wchar_t* kKeyBarSpacing            = L"AuraBars\\BarSpacing";
     const wchar_t* kKeySegmentGap            = L"AuraBars\\SegmentGap";
     const wchar_t* kKeySegmentHeight         = L"AuraBars\\SegmentHeight";
-    const wchar_t* kKeyTopMarginPercent      = L"AuraBars\\TopMarginPercent";
+    // New key name (not the old "TopMarginPercent") is deliberate: old
+    // percent-based saved values must NOT be migrated/reinterpreted as
+    // pixels, so this key is simply absent in any pre-existing config,
+    // falling back to the new pixel default automatically.
+    const wchar_t* kKeyTopMargin             = L"AuraBars\\TopMargin";
+    const wchar_t* kKeyBottomMargin          = L"AuraBars\\BottomMargin";
     const wchar_t* kKeyDebugLogging          = L"AuraBars\\DebugLogging";
     const wchar_t* kKeyChannelMode           = L"AuraBars\\ChannelMode";
-    const wchar_t* kKeyChannelGap            = L"AuraBars\\ChannelGap";
     const wchar_t* kKeyLeftMargin            = L"AuraBars\\LeftMargin";
     const wchar_t* kKeyRightMargin           = L"AuraBars\\RightMargin";
+    const wchar_t* kKeyBorderEnabled         = L"AuraBars\\BorderEnabled";
+    const wchar_t* kKeyBorderColor           = L"AuraBars\\BorderColor";
+    const wchar_t* kKeyBorderThickness       = L"AuraBars\\BorderThickness";
+    const wchar_t* kKeySeparatorEnabled      = L"AuraBars\\SeparatorEnabled";
+    const wchar_t* kKeySeparatorColor        = L"AuraBars\\SeparatorColor";
+    const wchar_t* kKeySeparatorThickness    = L"AuraBars\\SeparatorThickness";
 
     int ReadInt(IAIMPServiceConfig* cfg, const wchar_t* key, int def)
     {
@@ -83,12 +93,14 @@ void ClampSettings(AuraBarsSettings& s)
     s.barSpacing = std::clamp(s.barSpacing, 0, 20);
     s.segmentGap = std::clamp(s.segmentGap, 1, 8);
     s.segmentHeight = std::clamp(s.segmentHeight, 4, 20);
-    s.topMarginPercent = std::clamp(s.topMarginPercent, 0, 30);
     s.gridLineSpacing = std::clamp(s.gridLineSpacing, 8, 100);
     s.gridLineOpacity = std::clamp(s.gridLineOpacity, 0, 100);
-    s.channelGap = std::clamp(s.channelGap, 0, 40);
+    s.topMargin = std::clamp(s.topMargin, 0, 100);
+    s.bottomMargin = std::clamp(s.bottomMargin, 0, 100);
     s.leftMargin = std::clamp(s.leftMargin, 0, 100);
     s.rightMargin = std::clamp(s.rightMargin, 0, 100);
+    s.borderThickness = std::clamp(s.borderThickness, 1, 10);
+    s.separatorThickness = std::clamp(s.separatorThickness, 1, 10);
 }
 
 void LoadSettings(IAIMPServiceConfig* cfg, AuraBarsSettings& s)
@@ -123,12 +135,18 @@ void LoadSettings(IAIMPServiceConfig* cfg, AuraBarsSettings& s)
     s.barSpacing = ReadInt(cfg, kKeyBarSpacing, def.barSpacing);
     s.segmentGap = ReadInt(cfg, kKeySegmentGap, def.segmentGap);
     s.segmentHeight = ReadInt(cfg, kKeySegmentHeight, def.segmentHeight);
-    s.topMarginPercent = ReadInt(cfg, kKeyTopMarginPercent, def.topMarginPercent);
+    s.topMargin = ReadInt(cfg, kKeyTopMargin, def.topMargin);
+    s.bottomMargin = ReadInt(cfg, kKeyBottomMargin, def.bottomMargin);
     s.debugLogging = ReadInt(cfg, kKeyDebugLogging, def.debugLogging ? 1 : 0) != 0;
     s.channelMode = (ChannelMode)ReadInt(cfg, kKeyChannelMode, (int)def.channelMode);
-    s.channelGap = ReadInt(cfg, kKeyChannelGap, def.channelGap);
     s.leftMargin = ReadInt(cfg, kKeyLeftMargin, def.leftMargin);
     s.rightMargin = ReadInt(cfg, kKeyRightMargin, def.rightMargin);
+    s.borderEnabled = ReadInt(cfg, kKeyBorderEnabled, def.borderEnabled ? 1 : 0) != 0;
+    s.borderColor = (COLORREF)ReadInt(cfg, kKeyBorderColor, (int)def.borderColor);
+    s.borderThickness = ReadInt(cfg, kKeyBorderThickness, def.borderThickness);
+    s.separatorEnabled = ReadInt(cfg, kKeySeparatorEnabled, def.separatorEnabled ? 1 : 0) != 0;
+    s.separatorColor = (COLORREF)ReadInt(cfg, kKeySeparatorColor, (int)def.separatorColor);
+    s.separatorThickness = ReadInt(cfg, kKeySeparatorThickness, def.separatorThickness);
 
     ClampSettings(s);
 }
@@ -163,12 +181,18 @@ void SaveSettings(IAIMPServiceConfig* cfg, const AuraBarsSettings& s)
     WriteInt(cfg, kKeyBarSpacing, s.barSpacing);
     WriteInt(cfg, kKeySegmentGap, s.segmentGap);
     WriteInt(cfg, kKeySegmentHeight, s.segmentHeight);
-    WriteInt(cfg, kKeyTopMarginPercent, s.topMarginPercent);
+    WriteInt(cfg, kKeyTopMargin, s.topMargin);
+    WriteInt(cfg, kKeyBottomMargin, s.bottomMargin);
     WriteInt(cfg, kKeyDebugLogging, s.debugLogging ? 1 : 0);
     WriteInt(cfg, kKeyChannelMode, (int)s.channelMode);
-    WriteInt(cfg, kKeyChannelGap, s.channelGap);
     WriteInt(cfg, kKeyLeftMargin, s.leftMargin);
     WriteInt(cfg, kKeyRightMargin, s.rightMargin);
+    WriteInt(cfg, kKeyBorderEnabled, s.borderEnabled ? 1 : 0);
+    WriteInt(cfg, kKeyBorderColor, (int)s.borderColor);
+    WriteInt(cfg, kKeyBorderThickness, s.borderThickness);
+    WriteInt(cfg, kKeySeparatorEnabled, s.separatorEnabled ? 1 : 0);
+    WriteInt(cfg, kKeySeparatorColor, (int)s.separatorColor);
+    WriteInt(cfg, kKeySeparatorThickness, s.separatorThickness);
 
     cfg->FlushCache();
 }

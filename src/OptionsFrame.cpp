@@ -92,10 +92,14 @@ namespace
 
     const int kTabLayout[] = {
         IDC_LBL_TOPMARGIN, IDC_TOPMARGIN_EDIT,
-        IDC_LBL_CHANNELMODE, IDC_CHANNELMODE_COMBO,
-        IDC_LBL_CHANNELGAP, IDC_CHANNELGAP_EDIT,
+        IDC_LBL_BOTTOMMARGIN, IDC_BOTTOMMARGIN_EDIT,
         IDC_LBL_LEFTMARGIN, IDC_LEFTMARGIN_EDIT,
         IDC_LBL_RIGHTMARGIN, IDC_RIGHTMARGIN_EDIT,
+        IDC_LBL_CHANNELMODE, IDC_CHANNELMODE_COMBO,
+        IDC_BORDERENABLED_CHECK, IDC_BORDERCOLOR_BTN,
+        IDC_LBL_BORDERTHICKNESS, IDC_BORDERTHICKNESS_EDIT,
+        IDC_SEPARATORENABLED_CHECK, IDC_SEPARATORCOLOR_BTN,
+        IDC_LBL_SEPARATORTHICKNESS, IDC_SEPARATORTHICKNESS_EDIT,
     };
 
     void ShowGroup(HWND dlg, const int* ids, size_t count, bool show)
@@ -317,6 +321,12 @@ void COptionsFrame::HandleCommand(WPARAM wParam, LPARAM lParam)
         case IDC_PEAKCOLOR_BTN:
             PickColor(IDC_PEAKCOLOR_BTN, m_Working.peakMarkerColor);
             return;
+        case IDC_BORDERCOLOR_BTN:
+            PickColor(IDC_BORDERCOLOR_BTN, m_Working.borderColor);
+            return;
+        case IDC_SEPARATORCOLOR_BTN:
+            PickColor(IDC_SEPARATORCOLOR_BTN, m_Working.separatorColor);
+            return;
 
         case IDC_BARSTYLE_COMBO:
         case IDC_BARCOLORMODE_COMBO:
@@ -353,6 +363,8 @@ void COptionsFrame::HandleCommand(WPARAM wParam, LPARAM lParam)
         case IDC_GRIDLINES_CHECK:
         case IDC_PEAKMARKERS_CHECK:
         case IDC_DEBUGLOG_CHECK:
+        case IDC_BORDERENABLED_CHECK:
+        case IDC_SEPARATORENABLED_CHECK:
             if (code == BN_CLICKED)
                 NotifyModified();
             return;
@@ -369,9 +381,11 @@ void COptionsFrame::HandleCommand(WPARAM wParam, LPARAM lParam)
         case IDC_SEGMENTHEIGHT_EDIT:
         case IDC_GRIDSPACING_EDIT:
         case IDC_GRIDOPACITY_EDIT:
-        case IDC_CHANNELGAP_EDIT:
+        case IDC_BOTTOMMARGIN_EDIT:
         case IDC_LEFTMARGIN_EDIT:
         case IDC_RIGHTMARGIN_EDIT:
+        case IDC_BORDERTHICKNESS_EDIT:
+        case IDC_SEPARATORTHICKNESS_EDIT:
             if (code == EN_CHANGE)
                 NotifyModified();
             return;
@@ -422,23 +436,29 @@ void COptionsFrame::PopulateControls()
     SetButtonColorText(m_hDlg, IDC_BACKCOLOR_BTN, m_Working.backgroundColor);
     SetButtonColorText(m_hDlg, IDC_GRIDCOLOR_BTN, m_Working.gridLineColor);
     SetButtonColorText(m_hDlg, IDC_PEAKCOLOR_BTN, m_Working.peakMarkerColor);
+    SetButtonColorText(m_hDlg, IDC_BORDERCOLOR_BTN, m_Working.borderColor);
+    SetButtonColorText(m_hDlg, IDC_SEPARATORCOLOR_BTN, m_Working.separatorColor);
 
     CheckDlgButton(m_hDlg, IDC_GRIDLINES_CHECK, m_Working.gridLines ? BST_CHECKED : BST_UNCHECKED);
     SetDlgItemInt(m_hDlg, IDC_GRIDSPACING_EDIT, m_Working.gridLineSpacing, FALSE);
     SetDlgItemInt(m_hDlg, IDC_GRIDOPACITY_EDIT, m_Working.gridLineOpacity, FALSE);
     CheckDlgButton(m_hDlg, IDC_PEAKMARKERS_CHECK, m_Working.peakMarkers ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(m_hDlg, IDC_DEBUGLOG_CHECK, m_Working.debugLogging ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(m_hDlg, IDC_BORDERENABLED_CHECK, m_Working.borderEnabled ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(m_hDlg, IDC_SEPARATORENABLED_CHECK, m_Working.separatorEnabled ? BST_CHECKED : BST_UNCHECKED);
 
     SetDlgItemFloat(m_hDlg, IDC_PEAKFALLSPEED_EDIT, m_Working.peakFallSpeed);
     SetDlgItemInt(m_hDlg, IDC_PEAKTHICKNESS_EDIT, m_Working.peakMarkerThickness, FALSE);
     SetDlgItemInt(m_hDlg, IDC_PEAKHEIGHTSEG_EDIT, m_Working.peakMarkerHeightSegments, FALSE);
     SetDlgItemInt(m_hDlg, IDC_BARSPACING_EDIT, m_Working.barSpacing, FALSE);
-    SetDlgItemInt(m_hDlg, IDC_TOPMARGIN_EDIT, m_Working.topMarginPercent, FALSE);
+    SetDlgItemInt(m_hDlg, IDC_TOPMARGIN_EDIT, m_Working.topMargin, FALSE);
+    SetDlgItemInt(m_hDlg, IDC_BOTTOMMARGIN_EDIT, m_Working.bottomMargin, FALSE);
     SetDlgItemInt(m_hDlg, IDC_SEGMENTGAP_EDIT, m_Working.segmentGap, FALSE);
     SetDlgItemInt(m_hDlg, IDC_SEGMENTHEIGHT_EDIT, m_Working.segmentHeight, FALSE);
-    SetDlgItemInt(m_hDlg, IDC_CHANNELGAP_EDIT, m_Working.channelGap, FALSE);
     SetDlgItemInt(m_hDlg, IDC_LEFTMARGIN_EDIT, m_Working.leftMargin, FALSE);
     SetDlgItemInt(m_hDlg, IDC_RIGHTMARGIN_EDIT, m_Working.rightMargin, FALSE);
+    SetDlgItemInt(m_hDlg, IDC_BORDERTHICKNESS_EDIT, m_Working.borderThickness, FALSE);
+    SetDlgItemInt(m_hDlg, IDC_SEPARATORTHICKNESS_EDIT, m_Working.separatorThickness, FALSE);
 
     UpdateEnabledStates();
 }
@@ -459,19 +479,23 @@ void COptionsFrame::ReadControlsIntoWorking()
     m_Working.gridLines = IsDlgButtonChecked(m_hDlg, IDC_GRIDLINES_CHECK) == BST_CHECKED;
     m_Working.peakMarkers = IsDlgButtonChecked(m_hDlg, IDC_PEAKMARKERS_CHECK) == BST_CHECKED;
     m_Working.debugLogging = IsDlgButtonChecked(m_hDlg, IDC_DEBUGLOG_CHECK) == BST_CHECKED;
+    m_Working.borderEnabled = IsDlgButtonChecked(m_hDlg, IDC_BORDERENABLED_CHECK) == BST_CHECKED;
+    m_Working.separatorEnabled = IsDlgButtonChecked(m_hDlg, IDC_SEPARATORENABLED_CHECK) == BST_CHECKED;
 
     m_Working.peakFallSpeed = GetDlgItemFloat(m_hDlg, IDC_PEAKFALLSPEED_EDIT, m_Working.peakFallSpeed);
     m_Working.peakMarkerThickness = GetDlgItemInt(m_hDlg, IDC_PEAKTHICKNESS_EDIT, nullptr, FALSE);
     m_Working.peakMarkerHeightSegments = GetDlgItemInt(m_hDlg, IDC_PEAKHEIGHTSEG_EDIT, nullptr, FALSE);
     m_Working.barSpacing = GetDlgItemInt(m_hDlg, IDC_BARSPACING_EDIT, nullptr, FALSE);
-    m_Working.topMarginPercent = GetDlgItemInt(m_hDlg, IDC_TOPMARGIN_EDIT, nullptr, FALSE);
+    m_Working.topMargin = GetDlgItemInt(m_hDlg, IDC_TOPMARGIN_EDIT, nullptr, FALSE);
+    m_Working.bottomMargin = GetDlgItemInt(m_hDlg, IDC_BOTTOMMARGIN_EDIT, nullptr, FALSE);
     m_Working.segmentGap = GetDlgItemInt(m_hDlg, IDC_SEGMENTGAP_EDIT, nullptr, FALSE);
     m_Working.segmentHeight = GetDlgItemInt(m_hDlg, IDC_SEGMENTHEIGHT_EDIT, nullptr, FALSE);
     m_Working.gridLineSpacing = GetDlgItemInt(m_hDlg, IDC_GRIDSPACING_EDIT, nullptr, FALSE);
     m_Working.gridLineOpacity = GetDlgItemInt(m_hDlg, IDC_GRIDOPACITY_EDIT, nullptr, FALSE);
-    m_Working.channelGap = GetDlgItemInt(m_hDlg, IDC_CHANNELGAP_EDIT, nullptr, FALSE);
     m_Working.leftMargin = GetDlgItemInt(m_hDlg, IDC_LEFTMARGIN_EDIT, nullptr, FALSE);
     m_Working.rightMargin = GetDlgItemInt(m_hDlg, IDC_RIGHTMARGIN_EDIT, nullptr, FALSE);
+    m_Working.borderThickness = GetDlgItemInt(m_hDlg, IDC_BORDERTHICKNESS_EDIT, nullptr, FALSE);
+    m_Working.separatorThickness = GetDlgItemInt(m_hDlg, IDC_SEPARATORTHICKNESS_EDIT, nullptr, FALSE);
 
     // Colors are already current in m_Working; PickColor() updates it live.
 }
@@ -506,8 +530,10 @@ void COptionsFrame::UpdateEnabledStates()
     EnableWindow(GetDlgItem(m_hDlg, IDC_SEGMENTHEIGHT_EDIT), isLed);
     EnableWindow(GetDlgItem(m_hDlg, IDC_LBL_SEGMENTHEIGHT), isLed);
 
-    EnableWindow(GetDlgItem(m_hDlg, IDC_CHANNELGAP_EDIT), isStereo);
-    EnableWindow(GetDlgItem(m_hDlg, IDC_LBL_CHANNELGAP), isStereo);
+    EnableWindow(GetDlgItem(m_hDlg, IDC_SEPARATORENABLED_CHECK), isStereo);
+    EnableWindow(GetDlgItem(m_hDlg, IDC_SEPARATORCOLOR_BTN), isStereo);
+    EnableWindow(GetDlgItem(m_hDlg, IDC_LBL_SEPARATORTHICKNESS), isStereo);
+    EnableWindow(GetDlgItem(m_hDlg, IDC_SEPARATORTHICKNESS_EDIT), isStereo);
 }
 
 void COptionsFrame::ResetToDefaults()
