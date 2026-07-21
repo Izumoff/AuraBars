@@ -294,6 +294,10 @@ void WINAPI CVisualization::Draw(HCANVAS Canvas, PAIMPVisualData Data)
     std::vector<BarLayout> bars;
     std::vector<RECT> borderRects;   // 1 rect (Mono) or 2 rects (Stereo); border is drawn along these, bars/grid live inside their inset
     std::vector<RECT> innerRects;    // same count/order as borderRects; grid is bounded to these
+    // Same count/order as innerRects - each entry holds only that region's
+    // own bars, so DrawGrid's occupied-column skipping never walks into a
+    // different channel's (or otherwise out-of-bounds) bar positions.
+    std::vector<std::vector<BarLayout>> barsByRegion;
     bool drawSeparator = false;
     RECT separatorRect{};
     RECT innerVRange{};              // shared vertical bounds of the inner rect(s), for gradient reference
@@ -334,6 +338,7 @@ void WINAPI CVisualization::Draw(HCANVAS Canvas, PAIMPVisualData Data)
 
         borderRects = { leftRect, rightRect };
         innerRects = { leftInner, rightInner };
+        barsByRegion = { leftBars, rightBars };
         innerVRange = { area.left, leftInner.top, area.right, leftInner.bottom };
 
         if (g_Settings.separatorEnabled)
@@ -354,6 +359,7 @@ void WINAPI CVisualization::Draw(HCANVAS Canvas, PAIMPVisualData Data)
         ComputeBarLayout(inner, Data, -1, m_PeakYLeft, m_AutoGainCeilingDbLeft, m_SmoothedLeft, true, bars);
         borderRects = { barArea };
         innerRects = { inner };
+        barsByRegion = { bars };
         innerVRange = { area.left, inner.top, area.right, inner.bottom };
     }
 
@@ -366,8 +372,8 @@ void WINAPI CVisualization::Draw(HCANVAS Canvas, PAIMPVisualData Data)
     // gap around the separator.
     if (g_Settings.gridLines)
     {
-        for (const RECT& r : innerRects)
-            DrawGrid(m_MemDC, r, area, bars);
+        for (size_t i = 0; i < innerRects.size(); ++i)
+            DrawGrid(m_MemDC, innerRects[i], area, barsByRegion[i]);
     }
 
     DrawBarVisuals(m_MemDC, innerVRange, bars);
@@ -903,18 +909,18 @@ void CVisualization::DrawPeakMarker(HDC dc, const RECT& barRect, const RECT& are
         r.bottom += shift;
     }
 
-    // Same shift-not-crush treatment at the bottom: at true silence the
-    // marker sits right at area.bottom, and a plain
-    // "r.bottom = min(r.bottom, area.bottom)" clamp would crush the rect to
-    // zero height (r.top left unmoved while r.bottom gets pulled up to meet
-    // it) instead of shrinking it, so it vanished into the bottom border
-    // instead of settling visibly just above it.
-    const int clearanceBottom = area.bottom - (int)std::lround(kPeakTopClearancePx);
-    if (r.bottom > clearanceBottom)
+    // Unlike the top, a marker resting at true silence is expected to sit
+    // flush against the bottom border, not float above it with a gap - so
+    // this clamps r.bottom to touch area.bottom exactly rather than
+    // stopping short of it. It still has to preserve height rather than
+    // just clamping r.bottom in place (which would crush the rect to zero
+    // height when r.top is already at/past area.bottom and make the
+    // marker vanish), so r.top is pulled up by the same amount instead.
+    if (r.bottom > area.bottom)
     {
-        int shift = r.bottom - clearanceBottom;
-        r.top -= shift;
-        r.bottom -= shift;
+        int height = r.bottom - r.top;
+        r.bottom = area.bottom;
+        r.top = r.bottom - height;
     }
 
     if (r.top >= r.bottom)
