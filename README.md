@@ -38,3 +38,4 @@ MSVC (x86 + x64), `vcvarsall.bat` environment required per architecture. `build.
 
 - About tab in settings dialog
 - Bottom panel
+- Settings presets (Cygnus, Winapm, AIMP, Science)
