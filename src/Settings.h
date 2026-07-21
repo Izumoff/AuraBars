@@ -35,7 +35,8 @@ struct AuraBarsSettings
     COLORREF peakMarkerColor = RGB(0xFD, 0x42, 0x2D);
     double peakFallSpeed = 1.5;                        // px/frame, 0.1-10.0
     int peakMarkerThickness = 3;                       // px, 1-10, Smooth only
-    int peakMarkerHeightSegments = 1;                  // segments, 1-3, LED only
+    int peakMarkerHeightSegments = 1;                  // segments, 1-3, LED only, ignored when peakSmoothMotion is on
+    bool peakSmoothMotion = false;                     // LED only: continuous float peak position (like Smooth style) instead of segment-snapped
     int barSpacing = 8;                                // px, 0-20
     int segmentGap = 2;                                // px, 1-8, LED only
     int segmentHeight = 4;                             // px, 4-20, LED only

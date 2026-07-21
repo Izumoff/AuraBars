@@ -12,7 +12,7 @@ Native C++ spectrum-bar visualization plugin for AIMP (x86 + x64), implementing 
 - Background bars/LEDs: an always-full-height "unlit" layer drawn behind each bar (own independent Solid/Gradient color mode, separate from the front bar's), for a hardware-LED-meter look; off by default
 - Flat / gradient background
 - Grid lines: on/off, color, spacing, opacity, style (Dashed/Solid)
-- Peak markers: color, fall speed, thickness (Smooth style) / height in segments (LED style)
+- Peak markers: color, fall speed, thickness (Smooth style) / height in segments (LED style); optional smooth motion for LED style (continuous float position instead of segment-snapped, using thickness instead of segment height)
 - Linear / logarithmic (dB) amplitude scaling, configurable floor/ceiling, logarithmic bin-to-bar grouping
 - Auto-gain ceiling override (adaptive per-bar ceiling, fast attack / slow release)
 - Mono (combined) or Stereo (side-by-side L/R) channel mode

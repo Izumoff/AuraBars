@@ -30,6 +30,7 @@ namespace
     const wchar_t* kKeyPeakFallSpeed         = L"AuraBars\\PeakFallSpeed";
     const wchar_t* kKeyPeakMarkerThickness   = L"AuraBars\\PeakMarkerThickness";
     const wchar_t* kKeyPeakMarkerHeightSegs  = L"AuraBars\\PeakMarkerHeightSegments";
+    const wchar_t* kKeyPeakSmoothMotion      = L"AuraBars\\PeakSmoothMotion";
     const wchar_t* kKeyBarSpacing            = L"AuraBars\\BarSpacing";
     const wchar_t* kKeySegmentGap            = L"AuraBars\\SegmentGap";
     const wchar_t* kKeySegmentHeight         = L"AuraBars\\SegmentHeight";
@@ -145,6 +146,7 @@ void LoadSettings(IAIMPServiceConfig* cfg, AuraBarsSettings& s)
     s.peakFallSpeed = ReadFloat(cfg, kKeyPeakFallSpeed, def.peakFallSpeed);
     s.peakMarkerThickness = ReadInt(cfg, kKeyPeakMarkerThickness, def.peakMarkerThickness);
     s.peakMarkerHeightSegments = ReadInt(cfg, kKeyPeakMarkerHeightSegs, def.peakMarkerHeightSegments);
+    s.peakSmoothMotion = ReadInt(cfg, kKeyPeakSmoothMotion, def.peakSmoothMotion ? 1 : 0) != 0;
     s.barSpacing = ReadInt(cfg, kKeyBarSpacing, def.barSpacing);
     s.segmentGap = ReadInt(cfg, kKeySegmentGap, def.segmentGap);
     s.segmentHeight = ReadInt(cfg, kKeySegmentHeight, def.segmentHeight);
@@ -199,6 +201,7 @@ void SaveSettings(IAIMPServiceConfig* cfg, const AuraBarsSettings& s)
     WriteFloat(cfg, kKeyPeakFallSpeed, s.peakFallSpeed);
     WriteInt(cfg, kKeyPeakMarkerThickness, s.peakMarkerThickness);
     WriteInt(cfg, kKeyPeakMarkerHeightSegs, s.peakMarkerHeightSegments);
+    WriteInt(cfg, kKeyPeakSmoothMotion, s.peakSmoothMotion ? 1 : 0);
     WriteInt(cfg, kKeyBarSpacing, s.barSpacing);
     WriteInt(cfg, kKeySegmentGap, s.segmentGap);
     WriteInt(cfg, kKeySegmentHeight, s.segmentHeight);

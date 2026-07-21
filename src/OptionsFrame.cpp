@@ -284,7 +284,7 @@ void WINAPI COptionsFrame::OnChanged(IUnknown* Sender)
     if (SenderIs(Sender, m_BarStyleCombo) || SenderIs(Sender, m_BarColorModeCombo) ||
         SenderIs(Sender, m_AmpScaleCombo) || SenderIs(Sender, m_ChannelModeCombo) ||
         SenderIs(Sender, m_AutoGainCheck) || SenderIs(Sender, m_BarSmoothingCheck) ||
-        SenderIs(Sender, m_BackgroundBarColorModeCombo))
+        SenderIs(Sender, m_BackgroundBarColorModeCombo) || SenderIs(Sender, m_PeakSmoothMotionCheck))
     {
         UpdateEnabledStates();
         NotifyModified();
@@ -534,7 +534,7 @@ void COptionsFrame::BuildBarsTab(IAIMPUIWinControl* tab)
 void COptionsFrame::BuildPeaksTab(IAIMPUIWinControl* tab)
 {
     const int groupW = kFieldX + kFieldW + 10;
-    const int rows = 4;
+    const int rows = 5;
     IAIMPUIGroupBox* group = CreateGroupBox(tab, 10, 8, groupW, kGroupContentTop + rows * kRowH + kGroupContentBottom, L"Peak Markers");
 
     m_PeakMarkersCheck = CreateCheckBox(group, 10, kGroupContentTop, 140, 12, L"Peak markers");
@@ -548,6 +548,8 @@ void COptionsFrame::BuildPeaksTab(IAIMPUIWinControl* tab)
 
     m_PeakHeightSegLabel = CreateLabel(group, 10, kGroupContentTop + 3 * kRowH, kFieldX - 20, 12, L"Peak height, segments (LED, 1-3):");
     m_PeakHeightSegEdit = CreateEdit(group, kFieldX, kGroupContentTop + 3 * kRowH, kFieldW, kFieldH);
+
+    m_PeakSmoothMotionCheck = CreateCheckBox(group, 10, kGroupContentTop + 4 * kRowH, groupW - 20, 12, L"Peak marker smooth motion (LED style)");
 }
 
 void COptionsFrame::BuildBackgroundTab(IAIMPUIWinControl* tab)
@@ -669,6 +671,7 @@ void COptionsFrame::PopulateControls()
     SetEditInt(m_GridSpacingEdit, m_Working.gridLineSpacing);
     SetEditInt(m_GridOpacityEdit, m_Working.gridLineOpacity);
     SetCheckState(m_PeakMarkersCheck, m_Working.peakMarkers);
+    SetCheckState(m_PeakSmoothMotionCheck, m_Working.peakSmoothMotion);
     SetCheckState(m_DebugLogCheck, m_Working.debugLogging);
     SetCheckState(m_BorderEnabledCheck, m_Working.borderEnabled);
     SetCheckState(m_SeparatorEnabledCheck, m_Working.separatorEnabled);
@@ -709,6 +712,7 @@ void COptionsFrame::ReadControlsIntoWorking()
     m_Working.gridLines = GetCheckState(m_GridLinesCheck);
     m_Working.backgroundBarsEnabled = GetCheckState(m_BackgroundBarsCheck);
     m_Working.peakMarkers = GetCheckState(m_PeakMarkersCheck);
+    m_Working.peakSmoothMotion = GetCheckState(m_PeakSmoothMotionCheck);
     m_Working.debugLogging = GetCheckState(m_DebugLogCheck);
     m_Working.borderEnabled = GetCheckState(m_BorderEnabledCheck);
     m_Working.separatorEnabled = GetCheckState(m_SeparatorEnabledCheck);
@@ -766,10 +770,13 @@ void COptionsFrame::UpdateEnabledStates()
     SetEnabled(m_BackgroundBarGradBottomBtn, isBackgroundGradient);
     SetEnabled(m_BackgroundBarGradBottomLabel, isBackgroundGradient);
 
-    SetEnabled(m_PeakThicknessEdit, !isLed);
-    SetEnabled(m_PeakThicknessLabel, !isLed);
-    SetEnabled(m_PeakHeightSegEdit, isLed);
-    SetEnabled(m_PeakHeightSegLabel, isLed);
+    bool peakSmoothMotion = GetCheckState(m_PeakSmoothMotionCheck);
+    bool useThickness = !isLed || peakSmoothMotion;
+    SetEnabled(m_PeakThicknessEdit, useThickness);
+    SetEnabled(m_PeakThicknessLabel, useThickness);
+    SetEnabled(m_PeakHeightSegEdit, isLed && !peakSmoothMotion);
+    SetEnabled(m_PeakHeightSegLabel, isLed && !peakSmoothMotion);
+    SetEnabled(m_PeakSmoothMotionCheck, isLed);
     SetEnabled(m_SegmentGapEdit, isLed);
     SetEnabled(m_SegmentGapLabel, isLed);
     SetEnabled(m_SegmentHeightEdit, isLed);

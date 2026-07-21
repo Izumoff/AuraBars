@@ -139,6 +139,7 @@ private:
     IAIMPUIEdit* m_PeakThicknessEdit = nullptr;
     IAIMPUILabel* m_PeakHeightSegLabel = nullptr;
     IAIMPUIEdit* m_PeakHeightSegEdit = nullptr;
+    IAIMPUICheckBox* m_PeakSmoothMotionCheck = nullptr;
 
     // Background tab
     IAIMPUIComboBox* m_BackStyleCombo = nullptr;

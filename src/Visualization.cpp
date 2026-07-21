@@ -860,7 +860,12 @@ void CVisualization::DrawPeakMarker(HDC dc, const RECT& barRect, const RECT& are
     r.left = barRect.left;
     r.right = barRect.right;
 
-    if (g_Settings.barStyle == BarStyle::Smooth)
+    // Peak marker smooth motion (LED only) makes the LED peak behave
+    // exactly like Smooth style's already does - peakTopY itself is
+    // already a continuous, style-independent float (see ComputeBarLayout),
+    // so no separate tracking is needed here, just the same render branch.
+    if (g_Settings.barStyle == BarStyle::Smooth ||
+        (g_Settings.barStyle == BarStyle::LED && g_Settings.peakSmoothMotion))
     {
         r.top = (int)std::lround(peakTopY);
         r.bottom = r.top + g_Settings.peakMarkerThickness;
@@ -897,7 +902,21 @@ void CVisualization::DrawPeakMarker(HDC dc, const RECT& barRect, const RECT& are
         r.top += shift;
         r.bottom += shift;
     }
-    r.bottom = std::min(r.bottom, area.bottom);
+
+    // Same shift-not-crush treatment at the bottom: at true silence the
+    // marker sits right at area.bottom, and a plain
+    // "r.bottom = min(r.bottom, area.bottom)" clamp would crush the rect to
+    // zero height (r.top left unmoved while r.bottom gets pulled up to meet
+    // it) instead of shrinking it, so it vanished into the bottom border
+    // instead of settling visibly just above it.
+    const int clearanceBottom = area.bottom - (int)std::lround(kPeakTopClearancePx);
+    if (r.bottom > clearanceBottom)
+    {
+        int shift = r.bottom - clearanceBottom;
+        r.top -= shift;
+        r.bottom -= shift;
+    }
+
     if (r.top >= r.bottom)
         return;
 
