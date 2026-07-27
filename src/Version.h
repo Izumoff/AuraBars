@@ -7,7 +7,7 @@
 // parses the "#define AURABARS_VERSION_STRING" line below to stamp
 // ReadMe.txt) read this exact file, so the two can never drift apart -
 // change the version in this one place only.
-#define AURABARS_VERSION_STRING "2.2"
+#define AURABARS_VERSION_STRING "2.3"
 
 // Full displayed version is base version + build number (e.g. "1.1.202607171534"),
 // so two builds from the same base version are still distinguishable.
@@ -23,3 +23,17 @@
 #define AURABARS_WIDEN(x) AURABARS_WIDEN_PASTE(x)
 #define AURABARS_VERSION_WSTR AURABARS_WIDEN(AURABARS_VERSION_STRING)
 #define AURABARS_FULL_VERSION_WSTR AURABARS_WIDEN(AURABARS_FULL_VERSION_STRING)
+
+// The rest of the plugin's identity, on the same single-source-of-truth
+// footing as the version above: the About tab and package.bat's
+// AuraBars.txt generation both read these exact lines (package.bat via
+// findstr), so none of the five About-tab fields can drift from the
+// packaged metadata.
+#define AURABARS_NAME_STRING "AuraBars"
+#define AURABARS_AUTHOR_STRING "Kex Izumoff"
+#define AURABARS_TOPIC_STRING "https://aimp.ru/forum/index.php?topic=77997.0"
+#define AURABARS_DESCRIPTION_STRING "AuraBars is a lightweight spectrum-bar visualizer for AIMP."
+#define AURABARS_NAME_WSTR AURABARS_WIDEN(AURABARS_NAME_STRING)
+#define AURABARS_AUTHOR_WSTR AURABARS_WIDEN(AURABARS_AUTHOR_STRING)
+#define AURABARS_TOPIC_WSTR AURABARS_WIDEN(AURABARS_TOPIC_STRING)
+#define AURABARS_DESCRIPTION_WSTR AURABARS_WIDEN(AURABARS_DESCRIPTION_STRING)

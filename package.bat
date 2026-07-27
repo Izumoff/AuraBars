@@ -34,6 +34,27 @@ set "BUILDNUM=%BUILDNUM_RAW:"=%"
 set "FULLVERSION=%VERSION%.%BUILDNUM%"
 echo Version: %FULLVERSION%
 
+rem Name/Author/Topic/Description are read from the same Version.h that the
+rem About tab's C++ code reads, so the packaged metadata and the in-app
+rem display can never drift apart. NAME and TOPIC are single-token values
+rem (no embedded spaces), AUTHOR and DESCRIPTION are not, hence "tokens=3*"
+rem (token 3 to end of line) for those two, preserving their internal spacing.
+set "NAME_RAW="
+for /f "tokens=3" %%A in ('findstr /C:"#define AURABARS_NAME_STRING" "%ROOT%src\Version.h"') do set "NAME_RAW=%%A"
+set "NAME=%NAME_RAW:"=%"
+
+set "AUTHOR_RAW="
+for /f "tokens=3*" %%A in ('findstr /C:"#define AURABARS_AUTHOR_STRING" "%ROOT%src\Version.h"') do set "AUTHOR_RAW=%%A %%B"
+set "AUTHOR=%AUTHOR_RAW:"=%"
+
+set "TOPIC_RAW="
+for /f "tokens=3" %%A in ('findstr /C:"#define AURABARS_TOPIC_STRING" "%ROOT%src\Version.h"') do set "TOPIC_RAW=%%A"
+set "TOPIC=%TOPIC_RAW:"=%"
+
+set "DESC_RAW="
+for /f "tokens=3*" %%A in ('findstr /C:"#define AURABARS_DESCRIPTION_STRING" "%ROOT%src\Version.h"') do set "DESC_RAW=%%A %%B"
+set "DESCRIPTION=%DESC_RAW:"=%"
+
 echo.
 echo === Staging package layout ===
 rem Intentionally NOT wiping the whole staging folder anymore: ReadMe.txt
@@ -54,11 +75,11 @@ rem AuraBars.txt (unlike ReadMe.txt) is always regenerated fresh - it's
 rem never hand-edited. Version line sourced from the same Version.h /
 rem BuildNumber.h read above, so it can never drift from the System tab.
 if exist "%STAGE%\AuraBars.txt" del /f /q "%STAGE%\AuraBars.txt"
-> "%STAGE%\AuraBars.txt" echo Name: AuraBars
+> "%STAGE%\AuraBars.txt" echo Name: %NAME%
 >> "%STAGE%\AuraBars.txt" echo Version: %FULLVERSION%
->> "%STAGE%\AuraBars.txt" echo Author: Kex Izumoff
->> "%STAGE%\AuraBars.txt" echo Topic: https://aimp.ru/forum/index.php?topic=77997.0
->> "%STAGE%\AuraBars.txt" echo Description: AuraBars is a lightweight spectrum-bar visualizer for AIMP.
+>> "%STAGE%\AuraBars.txt" echo Author: %AUTHOR%
+>> "%STAGE%\AuraBars.txt" echo Topic: %TOPIC%
+>> "%STAGE%\AuraBars.txt" echo Description: %DESCRIPTION%
 if errorlevel 1 exit /b 1
 
 echo.

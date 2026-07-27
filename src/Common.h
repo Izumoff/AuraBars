@@ -47,3 +47,9 @@ private:
 // Creates a new IAIMPString from a wide string via the core object factory.
 // Returns an AddRef'd pointer (caller owns it) or nullptr on failure.
 IAIMPString* MakeAIMPString(const wchar_t* text);
+
+// Appends one timestamped line to %TEMP%\AuraBars_debug.log. Best-effort: a
+// failed open (e.g. locked file) just drops the sample, never crashes the
+// caller. Shared by Visualization.cpp (per-frame sample logging) and
+// OptionsFrame.cpp (clipboard-copy failure logging).
+void AppendDebugLog(const wchar_t* line);

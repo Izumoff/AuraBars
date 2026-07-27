@@ -3,7 +3,25 @@
 #include "Common.h"
 #include "Settings.h"
 #include <atomic>
+#include <string>
 #include <vector>
+
+// Clipboard payload serialization (System tab "Copy settings to clipboard" /
+// "Paste settings from clipboard", Code Contract §3). Pure functions over
+// AuraBarsSettings - no clipboard calls, no control handles - so the parser
+// sits directly beside the serializer in OptionsFrame.cpp and the two key
+// lists can never silently drift apart. SerializeSettings' output is
+// byte-identical to what the Copy button always produced.
+struct ParseSettingsResult
+{
+    AuraBarsSettings settings;   // populated from recognized keys; any key that's missing or fails to parse keeps its factory-default value here
+    bool valid = false;          // true iff the payload contained at least one key name recognized from the serializer's key list
+    int keysApplied = 0;         // recognized keys successfully parsed from the payload
+    int keysDefaulted = 0;       // recognized keys that fell back to their factory default (absent from the payload, or present but unparseable)
+};
+
+std::wstring SerializeSettings(const AuraBarsSettings& s);
+ParseSettingsResult ParseSettings(const std::wstring& payload);
 
 // IAIMPOptionsDialogFrame implementation built on AIMP's native IAIMPUIForm /
 // IAIMPUIControl widget framework (apiGUI.h) rather than a raw Win32 dialog.
@@ -42,6 +60,13 @@ public:
     void WINAPI OnChanged(IUnknown* Sender) override;
 
 private:
+    // Win32 TIMERPROC callback for the "Copied!"/"Copy failed" caption
+    // revert - must be a plain static function (not a real member) since
+    // SetTimer takes a C-callable function pointer. The frame instance is
+    // recovered via a window property on the form's own HWND rather than a
+    // global, so it stays correct even if multiple frames existed.
+    static void CALLBACK ClipboardTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
+
     // --- low-level construction helpers ---
     void SetBounds(IAIMPUIControl* control, int x, int y, int w, int h);
     void SetText(IAIMPPropertyList* propertyList, int propId, const wchar_t* text);
@@ -62,6 +87,7 @@ private:
     // --- tab construction --- (all use the m_UIService member, acquired
     // for the duration of CreateFrame only)
     void BuildTabs();
+    void BuildAboutTab(IAIMPUIWinControl* tab);
     void BuildSystemTab(IAIMPUIWinControl* tab);
     void BuildScalingTab(IAIMPUIWinControl* tab);
     void BuildBarsTab(IAIMPUIWinControl* tab);
@@ -76,6 +102,12 @@ private:
     void ResetToDefaults();
     void NotifyModified();
 
+    // Copy/Paste settings to/from clipboard (System tab buttons) - thin
+    // wrappers over the free SerializeSettings()/ParseSettings() functions
+    // declared above.
+    void CopySettingsToClipboard();
+    void PasteSettingsFromClipboard();
+
     std::atomic<long> m_RefCount{1};
     IAIMPServiceUI* m_UIService = nullptr; // borrowed for the duration of CreateFrame's Build* calls; not held long-term
     IAIMPUIForm* m_Form = nullptr;
@@ -89,8 +121,9 @@ private:
     std::vector<IUnknown*> m_OwnedControls;
 
     // System tab
-    IAIMPUILabel* m_VersionValueLabel = nullptr;
     IAIMPUIButton* m_ResetDefaultsBtn = nullptr;
+    IAIMPUIButton* m_CopyClipboardBtn = nullptr;
+    IAIMPUIButton* m_PasteClipboardBtn = nullptr;
     IAIMPUICheckBox* m_DebugLogCheck = nullptr;
 
     // Scaling tab

@@ -3,7 +3,12 @@
 #include <commdlg.h>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <ctime>
 #include <cwchar>
+#include <cwctype>
+#include <functional>
+#include <unordered_map>
 
 #pragma comment(lib, "comdlg32.lib")
 
@@ -108,6 +113,254 @@ namespace
     constexpr int kButtonH = 20;
     constexpr int kGroupContentTop = 20; // clears the group box caption
     constexpr int kGroupContentBottom = 10;
+
+    // --- Clipboard snapshot formatting helpers (§3 payload format) ---
+
+    const wchar_t* NameOf(BarStyle s) { return s == BarStyle::LED ? L"LED" : L"Smooth"; }
+    const wchar_t* NameOf(ColorMode m) { return m == ColorMode::Solid ? L"Solid" : L"Gradient"; }
+    const wchar_t* NameOf(BackgroundStyle s) { return s == BackgroundStyle::Flat ? L"Flat" : L"Gradient"; }
+    const wchar_t* NameOf(AmplitudeScaling s) { return s == AmplitudeScaling::Linear ? L"Linear" : L"Logarithmic"; }
+    const wchar_t* NameOf(GridLineStyle s) { return s == GridLineStyle::Dashed ? L"Dashed" : L"Solid"; }
+    const wchar_t* NameOf(ChannelMode m) { return m == ChannelMode::Mono ? L"Mono" : L"Stereo"; }
+    const wchar_t* NameOf(bool b) { return b ? L"true" : L"false"; }
+
+    std::wstring ColorHex(COLORREF c)
+    {
+        wchar_t buf[16];
+        swprintf_s(buf, L"#%02X%02X%02X", GetRValue(c), GetGValue(c), GetBValue(c));
+        return buf;
+    }
+
+    std::wstring Float1(double v)
+    {
+        wchar_t buf[32];
+        swprintf_s(buf, L"%.1f", v);
+        return buf;
+    }
+
+    // Window property name used to recover the COptionsFrame* from inside
+    // the static clipboard-timer callback (see ClipboardTimerProc). Copy and
+    // Paste each get their own timer ID so both buttons can be mid-revert
+    // simultaneously without one click cancelling the other's countdown.
+    const wchar_t* kClipboardFramePropName = L"AuraBarsOptionsFrame";
+    constexpr UINT_PTR kClipboardTimerId = 1;
+    constexpr UINT_PTR kPasteTimerId = 2;
+
+    // --- Clipboard payload parsing helpers (§3 "Paste settings from
+    // clipboard") - deliberately lenient on input, mirroring the formatting
+    // rules the serializer above follows on output. ---
+
+    std::wstring Trim(const std::wstring& s)
+    {
+        size_t b = s.find_first_not_of(L" \t\r\n");
+        if (b == std::wstring::npos)
+            return L"";
+        size_t e = s.find_last_not_of(L" \t\r\n");
+        return s.substr(b, e - b + 1);
+    }
+
+    std::wstring ToLowerCopy(std::wstring s)
+    {
+        for (wchar_t& c : s)
+            c = (wchar_t)towlower(c);
+        return s;
+    }
+
+    bool IEquals(const std::wstring& a, const wchar_t* b)
+    {
+        size_t n = wcslen(b);
+        if (a.size() != n)
+            return false;
+        for (size_t i = 0; i < n; ++i)
+        {
+            if (towlower(a[i]) != towlower(b[i]))
+                return false;
+        }
+        return true;
+    }
+
+    bool TryParseBool(const std::wstring& v, bool& out)
+    {
+        if (IEquals(v, L"true") || v == L"1") { out = true; return true; }
+        if (IEquals(v, L"false") || v == L"0") { out = false; return true; }
+        return false;
+    }
+
+    // Requires the entire (already-trimmed) string to be consumed - "12abc"
+    // must fail, not silently parse as 12.
+    bool TryParseInt(const std::wstring& v, int& out)
+    {
+        if (v.empty())
+            return false;
+        wchar_t* end = nullptr;
+        long value = wcstol(v.c_str(), &end, 10);
+        if (end != v.c_str() + v.size())
+            return false;
+        out = (int)value;
+        return true;
+    }
+
+    bool TryParseFloat(const std::wstring& v, double& out)
+    {
+        if (v.empty())
+            return false;
+        wchar_t* end = nullptr;
+        double value = wcstod(v.c_str(), &end);
+        if (end != v.c_str() + v.size())
+            return false;
+        out = value;
+        return true;
+    }
+
+    // Accepts #RRGGBB / #AARRGGBB (leading # optional, case-insensitive).
+    // The serializer never emits an alpha byte and nothing in this codebase
+    // stores one either, so an alpha byte on input is accepted and discarded
+    // rather than rejected.
+    bool TryParseColor(std::wstring v, COLORREF& out)
+    {
+        if (!v.empty() && v[0] == L'#')
+            v = v.substr(1);
+        if (v.size() != 6 && v.size() != 8)
+            return false;
+        for (wchar_t c : v)
+        {
+            if (!iswxdigit(c))
+                return false;
+        }
+        if (v.size() == 8)
+            v = v.substr(2);
+        unsigned long value = wcstoul(v.c_str(), nullptr, 16);
+        BYTE r = (BYTE)((value >> 16) & 0xFF);
+        BYTE g = (BYTE)((value >> 8) & 0xFF);
+        BYTE b = (BYTE)(value & 0xFF);
+        out = RGB(r, g, b);
+        return true;
+    }
+
+    bool ApplyBool(const std::wstring& v, bool& field) { return TryParseBool(v, field); }
+    bool ApplyInt(const std::wstring& v, int& field) { return TryParseInt(v, field); }
+    bool ApplyFloat(const std::wstring& v, double& field) { return TryParseFloat(v, field); }
+    bool ApplyColor(const std::wstring& v, COLORREF& field) { return TryParseColor(v, field); }
+
+    bool ApplyBarStyle(const std::wstring& v, BarStyle& field)
+    {
+        if (IEquals(v, L"LED")) { field = BarStyle::LED; return true; }
+        if (IEquals(v, L"Smooth")) { field = BarStyle::Smooth; return true; }
+        return false;
+    }
+    bool ApplyColorMode(const std::wstring& v, ColorMode& field)
+    {
+        if (IEquals(v, L"Solid")) { field = ColorMode::Solid; return true; }
+        if (IEquals(v, L"Gradient")) { field = ColorMode::Gradient; return true; }
+        return false;
+    }
+    bool ApplyBackgroundStyle(const std::wstring& v, BackgroundStyle& field)
+    {
+        if (IEquals(v, L"Flat")) { field = BackgroundStyle::Flat; return true; }
+        if (IEquals(v, L"Gradient")) { field = BackgroundStyle::Gradient; return true; }
+        return false;
+    }
+    bool ApplyAmplitudeScaling(const std::wstring& v, AmplitudeScaling& field)
+    {
+        if (IEquals(v, L"Linear")) { field = AmplitudeScaling::Linear; return true; }
+        if (IEquals(v, L"Logarithmic")) { field = AmplitudeScaling::Logarithmic; return true; }
+        return false;
+    }
+    bool ApplyGridLineStyle(const std::wstring& v, GridLineStyle& field)
+    {
+        if (IEquals(v, L"Dashed")) { field = GridLineStyle::Dashed; return true; }
+        if (IEquals(v, L"Solid")) { field = GridLineStyle::Solid; return true; }
+        return false;
+    }
+    bool ApplyChannelMode(const std::wstring& v, ChannelMode& field)
+    {
+        if (IEquals(v, L"Mono")) { field = ChannelMode::Mono; return true; }
+        if (IEquals(v, L"Stereo")) { field = ChannelMode::Stereo; return true; }
+        return false;
+    }
+
+    using KeyHandler = std::function<bool(const std::wstring&, AuraBarsSettings&)>;
+
+    // Key list mirrors SerializeSettings()'s output one-for-one (46 keys) -
+    // kept immediately below it in this file on purpose, per the contract's
+    // "the two must live next to each other" requirement. Key names are
+    // matched case-insensitively by the caller (ParseSettings lowercases
+    // before lookup), so they're registered here in whatever casing reads
+    // best.
+    std::unordered_map<std::wstring, KeyHandler> BuildParseHandlers()
+    {
+        std::unordered_map<std::wstring, KeyHandler> h;
+
+        h[L"debuglogging"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyBool(v, s.debugLogging); };
+
+        h[L"amplitudescaling"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyAmplitudeScaling(v, s.amplitudeScaling); };
+        h[L"dbfloor"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyFloat(v, s.dbFloor); };
+        h[L"dbceiling"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyFloat(v, s.dbCeiling); };
+        h[L"autogainceiling"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyBool(v, s.autoGainCeiling); };
+        h[L"barsmoothing"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyBool(v, s.barSmoothing); };
+        h[L"barsmoothingattack"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyFloat(v, s.barSmoothingAttack); };
+        h[L"barsmoothingdecay"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyFloat(v, s.barSmoothingDecay); };
+        h[L"numberofbars"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyInt(v, s.barCount); };
+
+        h[L"barstyle"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyBarStyle(v, s.barStyle); };
+        h[L"barcolormode"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyColorMode(v, s.barColorMode); };
+        h[L"barcolor"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyColor(v, s.barColorSolid); };
+        h[L"bargradienttop"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyColor(v, s.barGradientTop); };
+        h[L"bargradientbottom"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyColor(v, s.barGradientBottom); };
+        h[L"barspacing"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyInt(v, s.barSpacing); };
+        h[L"segmentgap"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyInt(v, s.segmentGap); };
+        h[L"segmentheight"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyInt(v, s.segmentHeight); };
+
+        h[L"peakmarkers"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyBool(v, s.peakMarkers); };
+        h[L"peakmarkercolor"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyColor(v, s.peakMarkerColor); };
+        h[L"peakfallspeed"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyFloat(v, s.peakFallSpeed); };
+        h[L"peakmarkerthickness"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyInt(v, s.peakMarkerThickness); };
+        h[L"peakmarkerheightsegments"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyInt(v, s.peakMarkerHeightSegments); };
+        h[L"peaksmoothmotion"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyBool(v, s.peakSmoothMotion); };
+
+        h[L"backgroundstyle"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyBackgroundStyle(v, s.backgroundStyle); };
+        h[L"backgroundcolor"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyColor(v, s.backgroundColor); };
+        h[L"gridlines"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyBool(v, s.gridLines); };
+        h[L"gridlinecolor"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyColor(v, s.gridLineColor); };
+        h[L"gridlinespacing"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyInt(v, s.gridLineSpacing); };
+        h[L"gridlineopacity"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyInt(v, s.gridLineOpacity); };
+        h[L"gridlinestyle"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyGridLineStyle(v, s.gridLineStyle); };
+        h[L"backgroundbarsenabled"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyBool(v, s.backgroundBarsEnabled); };
+        h[L"backgroundbarcolormode"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyColorMode(v, s.backgroundBarColorMode); };
+        h[L"backgroundbarcolor"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyColor(v, s.backgroundBarColorSolid); };
+        h[L"backgroundbargradienttop"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyColor(v, s.backgroundBarGradientTop); };
+        h[L"backgroundbargradientbottom"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyColor(v, s.backgroundBarGradientBottom); };
+
+        h[L"channelmode"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyChannelMode(v, s.channelMode); };
+        h[L"topmargin"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyInt(v, s.topMargin); };
+        h[L"bottommargin"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyInt(v, s.bottomMargin); };
+        h[L"leftmargin"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyInt(v, s.leftMargin); };
+        h[L"rightmargin"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyInt(v, s.rightMargin); };
+        h[L"borderenabled"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyBool(v, s.borderEnabled); };
+        h[L"bordercolor"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyColor(v, s.borderColor); };
+        h[L"borderthickness"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyInt(v, s.borderThickness); };
+        h[L"separatorenabled"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyBool(v, s.separatorEnabled); };
+        h[L"separatorcolor"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyColor(v, s.separatorColor); };
+        h[L"separatorthickness"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyInt(v, s.separatorThickness); };
+
+        return h;
+    }
+
+    // Pulls the informational "; Version: x.y.z" header comment out of a
+    // pasted payload for the debug-log mismatch note (§3) - never applied to
+    // settings, so it's kept separate from ParseSettings' key handling above.
+    std::wstring ExtractVersionComment(const std::wstring& payload)
+    {
+        size_t pos = payload.find(L"; Version:");
+        if (pos == std::wstring::npos)
+            return L"";
+        size_t lineEnd = payload.find(L'\n', pos);
+        std::wstring line = (lineEnd == std::wstring::npos) ? payload.substr(pos) : payload.substr(pos, lineEnd - pos);
+        size_t colon = line.find(L':');
+        if (colon == std::wstring::npos)
+            return L"";
+        return Trim(line.substr(colon + 1));
+    }
 }
 
 HRESULT WINAPI COptionsFrame::QueryInterface(REFIID iid, void** obj)
@@ -175,6 +428,13 @@ HWND WINAPI COptionsFrame::CreateFrame(HWND ParentWnd)
     // preferences dialog frame supplies the outer border/caption.
     m_Form->SetValueAsInt32(AIMPUI_FORM_PROPID_BORDERSTYLE, AIMPUI_FLAGS_BORDERSTYLE_NONE);
 
+    // Lets the static ClipboardTimerProc recover this instance from the
+    // HWND alone (SetTimer's callback only gets the window handle back, not
+    // a user-data pointer) - a window property, not GWLP_USERDATA, since
+    // this HWND belongs to AIMP's own UI framework and may already use that
+    // slot for its own purposes.
+    SetPropW(m_Form->GetHandle(), kClipboardFramePropName, (HANDLE)this);
+
     BuildTabs();
     PopulateControls();
 
@@ -198,6 +458,15 @@ void WINAPI COptionsFrame::DestroyFrame()
 
     if (m_Form)
     {
+        // Must happen before the form's HWND is torn down below: killing
+        // the timer here guarantees a pending callback can never fire into
+        // a freed form, and RemovePropW cleans up what SetPropW attached in
+        // CreateFrame (window properties don't self-clean on destroy).
+        HWND hwnd = m_Form->GetHandle();
+        KillTimer(hwnd, kClipboardTimerId);
+        KillTimer(hwnd, kPasteTimerId);
+        RemovePropW(hwnd, kClipboardFramePropName);
+
         // IAIMPUIForm::Release(BOOL Postponed) is AIMP's own window-teardown
         // method, unrelated to COM refcounting despite the name - it hides
         // IUnknown::Release() by name in C++ (no "using" clause in the SDK
@@ -279,6 +548,8 @@ void WINAPI COptionsFrame::OnChanged(IUnknown* Sender)
     if (SenderIs(Sender, m_PeakColorBtn))        { PickColor(m_PeakColorBtn, m_Working.peakMarkerColor); return; }
     if (SenderIs(Sender, m_BorderColorBtn))      { PickColor(m_BorderColorBtn, m_Working.borderColor); return; }
     if (SenderIs(Sender, m_SeparatorColorBtn))   { PickColor(m_SeparatorColorBtn, m_Working.separatorColor); return; }
+    if (SenderIs(Sender, m_CopyClipboardBtn))    { CopySettingsToClipboard(); return; }
+    if (SenderIs(Sender, m_PasteClipboardBtn))   { PasteSettingsFromClipboard(); return; }
 
     // Combos/checkboxes that gate other controls' enabled state.
     if (SenderIs(Sender, m_BarStyleCombo) || SenderIs(Sender, m_BarColorModeCombo) ||
@@ -415,6 +686,12 @@ int COptionsFrame::LabelRow(IAIMPUIWinControl* parent, int y, int indent, const 
 
 void COptionsFrame::BuildTabs()
 {
+    // The old Win32 hand-rolled tab strip needed an explicit "hide every
+    // non-active panel at creation" step (its absence was a fixed bug -
+    // every tab's controls rendered simultaneously on first load). AIMP's
+    // native IAIMPUIPageControl used here manages child-sheet visibility
+    // itself as part of the control, so that rule is preserved structurally
+    // by construction, not via any explicit hide-calls in this file.
     IAIMPUIPageControl* pages = nullptr;
     if (FAILED(m_UIService->CreateControl(m_Form, m_Form, nullptr, nullptr, IID_IAIMPUIPageControl, (void**)&pages)) || !pages)
         return;
@@ -443,6 +720,10 @@ void COptionsFrame::BuildTabs()
         return sheet;
     };
 
+    // Tab order matters here: IAIMPUIPageControl activates whichever tab
+    // sheet was added first, so About-first-and-selected-on-open falls out
+    // of this order with no separate "set active tab" call needed.
+    if (IAIMPUITabSheet* tab = addTab(L"About"))       BuildAboutTab(tab);
     if (IAIMPUITabSheet* tab = addTab(L"System"))     BuildSystemTab(tab);
     if (IAIMPUITabSheet* tab = addTab(L"Scaling"))     BuildScalingTab(tab);
     if (IAIMPUITabSheet* tab = addTab(L"Bars"))        BuildBarsTab(tab);
@@ -451,12 +732,43 @@ void COptionsFrame::BuildTabs()
     if (IAIMPUITabSheet* tab = addTab(L"Layout"))      BuildLayoutTab(tab);
 }
 
+void COptionsFrame::BuildAboutTab(IAIMPUIWinControl* tab)
+{
+    const int wideW = kFieldX + kFieldW + 90; // roomier than the standard field column - this is read-only prose, not a form field
+
+    int y = 8;
+    LabelRow(tab, y, 10, L"Name:");
+    CreateLabel(tab, kFieldX, y, kFieldW, 12, AURABARS_NAME_WSTR);
+    y += kRowH;
+
+    LabelRow(tab, y, 10, L"Version:");
+    CreateLabel(tab, kFieldX, y, kFieldW, 12, AURABARS_FULL_VERSION_WSTR);
+    y += kRowH;
+
+    LabelRow(tab, y, 10, L"Author:");
+    CreateLabel(tab, kFieldX, y, kFieldW, 12, AURABARS_AUTHOR_WSTR);
+    y += kRowH;
+
+    // apiGUI.h exposes AIMPUI_LABEL_PROPID_URL directly on IAIMPUILabel -
+    // AIMP's own native link control - so this renders as a real clickable
+    // hyperlink with no manual click hit-testing or ShellExecuteW fallback
+    // needed.
+    LabelRow(tab, y, 10, L"Topic:");
+    IAIMPUILabel* topicLink = CreateLabel(tab, kFieldX, y, wideW - kFieldX, 12, AURABARS_TOPIC_WSTR);
+    SetText(topicLink, AIMPUI_LABEL_PROPID_URL, AURABARS_TOPIC_WSTR);
+    y += kRowH;
+
+    LabelRow(tab, y, 10, L"Description:");
+    IAIMPUILabel* descLabel = CreateLabel(tab, kFieldX, y, wideW - kFieldX, 24, AURABARS_DESCRIPTION_WSTR);
+    if (descLabel)
+        descLabel->SetValueAsInt32(AIMPUI_LABEL_PROPID_WORDWRAP, 1);
+}
+
 void COptionsFrame::BuildSystemTab(IAIMPUIWinControl* tab)
 {
-    LabelRow(tab, 8, 10, L"Version:");
-    m_VersionValueLabel = CreateLabel(tab, kFieldX, 8, kFieldW, 12, L"");
-
-    m_ResetDefaultsBtn = CreateButton(tab, 10, 8 + kRowH, 150, kButtonH, L"Reset to Defaults");
+    m_ResetDefaultsBtn = CreateButton(tab, 10, 8, 150, kButtonH, L"Reset to Defaults");
+    m_CopyClipboardBtn = CreateButton(tab, 10, 8 + kRowH, 190, kButtonH, L"Copy settings to clipboard");
+    m_PasteClipboardBtn = CreateButton(tab, 10 + 190 + 10, 8 + kRowH, 200, kButtonH, L"Paste settings from clipboard");
 
     m_DebugLogCheck = CreateCheckBox(tab, 10, 8 + 2 * kRowH, 320, 20, L"Debug logging (writes to %TEMP%\\AuraBars_debug.log, 1/sec)");
 }
@@ -636,8 +948,6 @@ void COptionsFrame::BuildLayoutTab(IAIMPUIWinControl* tab)
 
 void COptionsFrame::PopulateControls()
 {
-    SetText(m_VersionValueLabel, AIMPUI_LABEL_PROPID_TEXT, AURABARS_FULL_VERSION_WSTR);
-
     SetEditInt(m_BarCountEdit, m_Working.barCount);
     SetComboIndex(m_AmpScaleCombo, (int)m_Working.amplitudeScaling);
     SetEditFloat(m_DbFloorEdit, m_Working.dbFloor);
@@ -826,5 +1136,293 @@ void COptionsFrame::NotifyModified()
     {
         svc->FrameModified(this);
         svc->Release();
+    }
+}
+
+void CALLBACK COptionsFrame::ClipboardTimerProc(HWND hwnd, UINT /*uMsg*/, UINT_PTR idEvent, DWORD /*dwTime*/)
+{
+    COptionsFrame* self = (COptionsFrame*)GetPropW(hwnd, kClipboardFramePropName);
+    KillTimer(hwnd, idEvent);
+    if (!self)
+        return;
+    if (idEvent == kClipboardTimerId && self->m_CopyClipboardBtn)
+        self->SetText(self->m_CopyClipboardBtn, AIMPUI_BUTTON_PROPID_CAPTION, L"Copy settings to clipboard");
+    else if (idEvent == kPasteTimerId && self->m_PasteClipboardBtn)
+        self->SetText(self->m_PasteClipboardBtn, AIMPUI_BUTTON_PROPID_CAPTION, L"Paste settings from clipboard");
+}
+
+std::wstring SerializeSettings(const AuraBarsSettings& s)
+{
+    time_t t = time(nullptr);
+    tm local;
+    localtime_s(&local, &t);
+    wchar_t timestamp[32];
+    wcsftime(timestamp, 32, L"%Y-%m-%d %H:%M:%S", &local);
+
+#ifdef _WIN64
+    const wchar_t* arch = L"x64";
+#else
+    const wchar_t* arch = L"x86";
+#endif
+
+    std::wstring out;
+    out += L"; AuraBars settings snapshot\r\n";
+    out += L"; Version: "; out += AURABARS_FULL_VERSION_WSTR; out += L"\r\n";
+    out += L"; Build: "; out += arch; out += L"\r\n";
+    out += L"; Generated: "; out += timestamp; out += L"\r\n";
+    out += L"\r\n";
+
+    out += L"[System]\r\n";
+    out += L"DebugLogging="; out += NameOf(s.debugLogging); out += L"\r\n";
+    out += L"\r\n";
+
+    // Number of bars actually lives on the Scaling tab (not Bars) - see the
+    // reconciled Code Contract - so it's grouped here to match "sections in
+    // tab order."
+    out += L"[Scaling]\r\n";
+    out += L"AmplitudeScaling="; out += NameOf(s.amplitudeScaling); out += L"\r\n";
+    out += L"dBFloor="; out += Float1(s.dbFloor); out += L"\r\n";
+    out += L"dBCeiling="; out += Float1(s.dbCeiling); out += L"\r\n";
+    out += L"AutoGainCeiling="; out += NameOf(s.autoGainCeiling); out += L"\r\n";
+    out += L"BarSmoothing="; out += NameOf(s.barSmoothing); out += L"\r\n";
+    out += L"BarSmoothingAttack="; out += Float1(s.barSmoothingAttack); out += L"\r\n";
+    out += L"BarSmoothingDecay="; out += Float1(s.barSmoothingDecay); out += L"\r\n";
+    out += L"NumberOfBars="; out += std::to_wstring(s.barCount); out += L"\r\n";
+    out += L"\r\n";
+
+    out += L"[Bars]\r\n";
+    out += L"BarStyle="; out += NameOf(s.barStyle); out += L"\r\n";
+    out += L"BarColorMode="; out += NameOf(s.barColorMode); out += L"\r\n";
+    out += L"BarColor="; out += ColorHex(s.barColorSolid); out += L"\r\n";
+    out += L"BarGradientTop="; out += ColorHex(s.barGradientTop); out += L"\r\n";
+    out += L"BarGradientBottom="; out += ColorHex(s.barGradientBottom); out += L"\r\n";
+    out += L"BarSpacing="; out += std::to_wstring(s.barSpacing); out += L"\r\n";
+    out += L"SegmentGap="; out += std::to_wstring(s.segmentGap); out += L"\r\n";
+    out += L"SegmentHeight="; out += std::to_wstring(s.segmentHeight); out += L"\r\n";
+    out += L"\r\n";
+
+    out += L"[Peaks]\r\n";
+    out += L"PeakMarkers="; out += NameOf(s.peakMarkers); out += L"\r\n";
+    out += L"PeakMarkerColor="; out += ColorHex(s.peakMarkerColor); out += L"\r\n";
+    out += L"PeakFallSpeed="; out += Float1(s.peakFallSpeed); out += L"\r\n";
+    out += L"PeakMarkerThickness="; out += std::to_wstring(s.peakMarkerThickness); out += L"\r\n";
+    out += L"PeakMarkerHeightSegments="; out += std::to_wstring(s.peakMarkerHeightSegments); out += L"\r\n";
+    out += L"PeakSmoothMotion="; out += NameOf(s.peakSmoothMotion); out += L"\r\n";
+    out += L"\r\n";
+
+    // Background Bars now lives on the Background tab (moved there from
+    // Bars in an earlier session) - grouped here to match.
+    out += L"[Background]\r\n";
+    out += L"BackgroundStyle="; out += NameOf(s.backgroundStyle); out += L"\r\n";
+    out += L"BackgroundColor="; out += ColorHex(s.backgroundColor); out += L"\r\n";
+    out += L"GridLines="; out += NameOf(s.gridLines); out += L"\r\n";
+    out += L"GridLineColor="; out += ColorHex(s.gridLineColor); out += L"\r\n";
+    out += L"GridLineSpacing="; out += std::to_wstring(s.gridLineSpacing); out += L"\r\n";
+    out += L"GridLineOpacity="; out += std::to_wstring(s.gridLineOpacity); out += L"\r\n";
+    out += L"GridLineStyle="; out += NameOf(s.gridLineStyle); out += L"\r\n";
+    out += L"BackgroundBarsEnabled="; out += NameOf(s.backgroundBarsEnabled); out += L"\r\n";
+    out += L"BackgroundBarColorMode="; out += NameOf(s.backgroundBarColorMode); out += L"\r\n";
+    out += L"BackgroundBarColor="; out += ColorHex(s.backgroundBarColorSolid); out += L"\r\n";
+    out += L"BackgroundBarGradientTop="; out += ColorHex(s.backgroundBarGradientTop); out += L"\r\n";
+    out += L"BackgroundBarGradientBottom="; out += ColorHex(s.backgroundBarGradientBottom); out += L"\r\n";
+    out += L"\r\n";
+
+    out += L"[Layout]\r\n";
+    out += L"ChannelMode="; out += NameOf(s.channelMode); out += L"\r\n";
+    out += L"TopMargin="; out += std::to_wstring(s.topMargin); out += L"\r\n";
+    out += L"BottomMargin="; out += std::to_wstring(s.bottomMargin); out += L"\r\n";
+    out += L"LeftMargin="; out += std::to_wstring(s.leftMargin); out += L"\r\n";
+    out += L"RightMargin="; out += std::to_wstring(s.rightMargin); out += L"\r\n";
+    out += L"BorderEnabled="; out += NameOf(s.borderEnabled); out += L"\r\n";
+    out += L"BorderColor="; out += ColorHex(s.borderColor); out += L"\r\n";
+    out += L"BorderThickness="; out += std::to_wstring(s.borderThickness); out += L"\r\n";
+    out += L"SeparatorEnabled="; out += NameOf(s.separatorEnabled); out += L"\r\n";
+    out += L"SeparatorColor="; out += ColorHex(s.separatorColor); out += L"\r\n";
+    out += L"SeparatorThickness="; out += std::to_wstring(s.separatorThickness); out += L"\r\n";
+
+    return out;
+}
+
+ParseSettingsResult ParseSettings(const std::wstring& payload)
+{
+    static const std::unordered_map<std::wstring, KeyHandler> handlers = BuildParseHandlers();
+
+    ParseSettingsResult result;
+    AuraBarsSettings& s = result.settings; // default-constructed = factory defaults; only overwritten below for keys that actually parse
+
+    // Per-key outcome, keyed by lowercased key name: present in this map at
+    // all means the key was recognized in the payload (which is what makes
+    // the payload "valid" below); the bool is whether its value parsed.
+    // A repeated key's last occurrence wins, matching plain INI semantics.
+    std::unordered_map<std::wstring, bool> outcomes;
+
+    size_t pos = 0;
+    while (pos < payload.size())
+    {
+        size_t nl = payload.find(L'\n', pos);
+        std::wstring line = (nl == std::wstring::npos) ? payload.substr(pos) : payload.substr(pos, nl - pos);
+        pos = (nl == std::wstring::npos) ? payload.size() : nl + 1;
+
+        std::wstring trimmed = Trim(line);
+        if (trimmed.empty() || trimmed[0] == L';' || trimmed[0] == L'[')
+            continue; // blank, comment, or section header (context only)
+
+        size_t eq = trimmed.find(L'=');
+        if (eq == std::wstring::npos)
+            continue;
+
+        std::wstring key = ToLowerCopy(Trim(trimmed.substr(0, eq)));
+        std::wstring value = Trim(trimmed.substr(eq + 1));
+
+        auto it = handlers.find(key);
+        if (it == handlers.end())
+            continue; // unknown key - ignored silently (forward compatibility)
+
+        outcomes[key] = it->second(value, s);
+    }
+
+    result.valid = !outcomes.empty();
+    for (const auto& kv : handlers)
+    {
+        auto oc = outcomes.find(kv.first);
+        if (oc != outcomes.end() && oc->second)
+            ++result.keysApplied;
+        else
+            ++result.keysDefaulted; // absent from payload, or present but unparseable
+    }
+
+    // Clamps every numeric field to its documented range - the same
+    // ClampSettings() the Save path already uses, so parsed-but-out-of-range
+    // values are clamped rather than rejected, with no duplicated range
+    // logic to drift from Settings.cpp.
+    ClampSettings(s);
+
+    return result;
+}
+
+void COptionsFrame::CopySettingsToClipboard()
+{
+    // Live dialog state including unapplied edits, not the last-persisted
+    // g_Settings - this is the same read used at Save time, just invoked
+    // here instead without touching g_Settings or ClampSettings.
+    ReadControlsIntoWorking();
+    std::wstring payload = SerializeSettings(m_Working);
+
+    bool ok = false;
+    if (OpenClipboard(m_Form ? m_Form->GetHandle() : nullptr))
+    {
+        EmptyClipboard();
+        SIZE_T bytes = (payload.size() + 1) * sizeof(wchar_t);
+        HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, bytes);
+        if (mem)
+        {
+            void* dst = GlobalLock(mem);
+            if (dst)
+            {
+                memcpy(dst, payload.c_str(), bytes);
+                GlobalUnlock(mem);
+                // SetClipboardData takes ownership of mem only on success -
+                // freeing it ourselves after a successful call would be a
+                // double-free of memory the clipboard now owns.
+                if (SetClipboardData(CF_UNICODETEXT, mem))
+                    ok = true;
+            }
+            if (!ok)
+                GlobalFree(mem);
+        }
+        CloseClipboard();
+    }
+
+    if (m_CopyClipboardBtn)
+        SetText(m_CopyClipboardBtn, AIMPUI_BUTTON_PROPID_CAPTION, ok ? L"Copied!" : L"Copy failed");
+
+    if (!ok && g_Settings.debugLogging)
+        AppendDebugLog(L"Copy settings to clipboard failed (OpenClipboard/GlobalAlloc/SetClipboardData)");
+
+    // IAIMPUIButton exposes no per-control background/color-override
+    // property in apiGUI.h (checked: CAPTION/FOCUSABLE/DEFAULT/
+    // DROPDOWNMENU/IMAGEINDEX/IMAGELIST/MODALRESULT/STYLE/TEXTSTYLE only,
+    // no color propid) - falling back to caption-only feedback rather than
+    // inventing a workaround, per the contract's own fallback instruction.
+
+    if (m_Form)
+    {
+        HWND hwnd = m_Form->GetHandle();
+        KillTimer(hwnd, kClipboardTimerId); // re-click restarts the revert countdown from zero
+        SetTimer(hwnd, kClipboardTimerId, 2000, &COptionsFrame::ClipboardTimerProc);
+    }
+}
+
+void COptionsFrame::PasteSettingsFromClipboard()
+{
+    std::wstring payload;
+    bool gotPayload = false;
+
+    if (OpenClipboard(m_Form ? m_Form->GetHandle() : nullptr))
+    {
+        if (IsClipboardFormatAvailable(CF_UNICODETEXT))
+        {
+            HANDLE h = GetClipboardData(CF_UNICODETEXT);
+            if (h)
+            {
+                const wchar_t* data = (const wchar_t*)GlobalLock(h);
+                if (data)
+                {
+                    payload = data; // copy out before unlocking - never mutate the clipboard's own memory
+                    gotPayload = true;
+                    GlobalUnlock(h);
+                }
+            }
+        }
+        CloseClipboard();
+    }
+
+    ParseSettingsResult parsed;
+    bool ok = false;
+    if (gotPayload)
+    {
+        parsed = ParseSettings(payload);
+        ok = parsed.valid;
+
+        if (g_Settings.debugLogging)
+        {
+            std::wstring headerVersion = ExtractVersionComment(payload);
+            if (!headerVersion.empty() && headerVersion != AURABARS_FULL_VERSION_WSTR)
+            {
+                std::wstring line = L"Paste settings from clipboard: payload version " + headerVersion +
+                    L" differs from running version " + AURABARS_FULL_VERSION_WSTR;
+                AppendDebugLog(line.c_str());
+            }
+        }
+    }
+
+    // Parse fully into parsed.settings first; only now, with valid==true
+    // confirmed, do we touch a single dialog control. Zero recognized keys
+    // (or no clipboard text at all) leaves every control exactly as it was.
+    if (ok)
+    {
+        m_Working = parsed.settings;
+        PopulateControls(); // writes every control and re-runs UpdateEnabledStates() for dependent-control gating
+        NotifyModified();
+    }
+
+    if (m_PasteClipboardBtn)
+        SetText(m_PasteClipboardBtn, AIMPUI_BUTTON_PROPID_CAPTION, ok ? L"Pasted!" : L"Paste failed");
+
+    if (g_Settings.debugLogging)
+    {
+        wchar_t buf[160];
+        if (ok)
+            swprintf_s(buf, L"Paste settings from clipboard succeeded (applied=%d, defaulted=%d)", parsed.keysApplied, parsed.keysDefaulted);
+        else
+            swprintf_s(buf, L"Paste settings from clipboard failed (clipboard unavailable, empty, or no recognized keys)");
+        AppendDebugLog(buf);
+    }
+
+    if (m_Form)
+    {
+        HWND hwnd = m_Form->GetHandle();
+        KillTimer(hwnd, kPasteTimerId); // re-click restarts the revert countdown from zero; independent of Copy's timer
+        SetTimer(hwnd, kPasteTimerId, 2000, &COptionsFrame::ClipboardTimerProc);
     }
 }
