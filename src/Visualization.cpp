@@ -1,4 +1,5 @@
 #include "Visualization.h"
+#include "BarGeometry.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -345,6 +346,25 @@ void WINAPI CVisualization::Draw(HCANVAS Canvas, PAIMPVisualData Data)
         innerVRange = { area.left, inner.top, area.right, inner.bottom };
     }
 
+    // Clipping backstop: confines grid/bar/peak drawing to exactly the
+    // drawable rect(s) - the union of innerRects, one per channel - so a
+    // geometry arithmetic error can never paint over the border or spill
+    // into the skin's own chrome outside the plugin. This is defence in
+    // depth, not a substitute for ComputeBarGeometry's fit invariant
+    // (BarGeometry.cpp); it only ever crops an already-correct layout that
+    // has nowhere it should legitimately be reaching beyond this region.
+    // Lifted again below, before Separator/Border, which must paint outside
+    // the inner rect deliberately.
+    HRGN clipRgn = CreateRectRgnIndirect(&innerRects[0]);
+    for (size_t i = 1; i < innerRects.size(); ++i)
+    {
+        HRGN extra = CreateRectRgnIndirect(&innerRects[i]);
+        CombineRgn(clipRgn, clipRgn, extra, RGN_OR);
+        DeleteObject(extra);
+    }
+    SelectClipRgn(m_MemDC, clipRgn);
+    DeleteObject(clipRgn);
+
     // Grid needs each bar's current top *before* it draws, so it can skip
     // every pixel below that top for that bar's column - LED segment gaps
     // included, since that whole span visually belongs to the bar even
@@ -359,6 +379,8 @@ void WINAPI CVisualization::Draw(HCANVAS Canvas, PAIMPVisualData Data)
     }
 
     DrawBarVisuals(m_MemDC, innerVRange, bars);
+
+    SelectClipRgn(m_MemDC, nullptr);
 
     // Separator and Border are decorative chrome, drawn last on top of
     // everything else so a loud bar reaching full height never occludes
@@ -573,7 +595,17 @@ void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* d
                                        std::vector<float>& smoothedState,
                                        bool emitDebugLog, std::vector<BarLayout>& out)
 {
-    const int n = std::clamp(g_Settings.barCount, 8, 128);
+    // Shared with BuildEnvironmentSection() (OptionsFrame.cpp) via
+    // BarGeometry.h/.cpp, so EnvEffectiveBarWidth/EnvEffectiveBarCount in a
+    // Copy snapshot can never diverge from what actually gets laid out
+    // here. Enforces the row-fit invariant (bar row must not exceed the
+    // drawable width) by reducing spacing, then bar count, below the
+    // user's configured values when needed - those stored settings
+    // themselves are untouched; this is a render-time-only adjustment.
+    const int drawableWidth = (int)(area.right - area.left);
+    const BarGeometry geometry = ComputeBarGeometry(drawableWidth, g_Settings.barCount, g_Settings.barSpacing);
+    const int n = geometry.effectiveBarCount;
+
     if ((int)peakState.size() != n)
         peakState.assign(n, (float)area.bottom);
     if ((int)autoGainState.size() != n)
@@ -584,9 +616,9 @@ void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* d
     out.clear();
     out.reserve(n);
 
-    const int spacing = g_Settings.barSpacing;
+    const int spacing = geometry.effectiveSpacing;
     const int totalSpacing = spacing * (n - 1);
-    const int availWidth = std::max(0, (int)(area.right - area.left) - totalSpacing);
+    const int availWidth = std::max(0, drawableWidth - totalSpacing);
     const int totalHeight = area.bottom - area.top;
 
     // Per-bar width via cumulative rounding rather than a single truncated
@@ -767,7 +799,7 @@ void CVisualization::DrawBackgroundBarLayer(HDC dc, const RECT& barRect, const R
         // every segment top-to-bottom is drawn, representing the always-
         // present "unlit" LEDs of a hardware meter.
         const int segH = std::max(1, g_Settings.segmentHeight);
-        const int gap = std::max(0, g_Settings.segmentGap);
+        const int gap = std::max(1, g_Settings.segmentGap);
         const int step = segH + gap;
 
         for (int y = area.bottom; y > area.top; y -= step)
@@ -797,7 +829,7 @@ void CVisualization::DrawBackgroundBarLayer(HDC dc, const RECT& barRect, const R
 void CVisualization::DrawLedBar(HDC dc, const RECT& barRect, const RECT& area)
 {
     const int segH = std::max(1, g_Settings.segmentHeight);
-    const int gap = std::max(0, g_Settings.segmentGap);
+    const int gap = std::max(1, g_Settings.segmentGap);
     const int step = segH + gap;
     const int litTopThreshold = barRect.top; // segments whose top is at/above this are lit
 
@@ -861,7 +893,7 @@ void CVisualization::DrawPeakMarker(HDC dc, const RECT& barRect, const RECT& are
     else
     {
         const int segH = std::max(1, g_Settings.segmentHeight);
-        const int gap = std::max(0, g_Settings.segmentGap);
+        const int gap = std::max(1, g_Settings.segmentGap);
         const int step = segH + gap;
         const int segs = g_Settings.peakMarkerHeightSegments;
         const int markerHeight = segH * segs + gap * (segs - 1);

@@ -8,9 +8,13 @@ set "STAGE=%PKGDIR%\AuraBars"
 
 rem Captured before build.bat regenerates BuildNumber.h, so it can be
 rem compared against the freshly-generated number below (Code Contract
-rem Sec6: "fail the build loudly if the newly computed <build> equals the
-rem one already recorded from the previous package"). Left undefined on a
-rem fresh checkout with no BuildNumber.h yet - nothing to compare against.
+rem Sec6: "fail the build loudly if the computed <build> equals the one
+rem recorded from the previous package"). Left undefined on a fresh
+rem checkout with no BuildNumber.h yet - nothing to compare against. This
+rem is a plain string equality check, not a numeric/ordering comparison -
+rem <build> (HHmm) is deliberately not monotonic, so "equal" is the only
+rem thing that's ever wrong; a numerically lower new value than the
+rem previous one is normal and must not be flagged.
 set "PREVBUILDNUM="
 set "PREVBUILDNUM_RAW="
 if exist "%ROOT%src\BuildNumber.h" for /f "tokens=3" %%A in ('findstr /C:"#define AURABARS_BUILD_NUMBER" "%ROOT%src\BuildNumber.h"') do set "PREVBUILDNUM_RAW=%%A"
@@ -41,17 +45,18 @@ if not defined BUILDNUM_RAW (
 )
 set "BUILDNUM=%BUILDNUM_RAW:"=%"
 
-rem Code Contract Sec6: "fail the build loudly if the newly computed
-rem <build> equals the one already recorded from the previous package - a
-rem packaging step that silently reuses a number is worse than one that
-rem errors." build.bat's counter is monotonic by construction, so this
-rem should be structurally unreachable; it's kept as an explicit,
-rem independent check anyway rather than trusting that invariant silently.
+rem Code Contract Sec6: "fail the build loudly if the computed <build>
+rem equals the one recorded from the previous package - a packaging step
+rem that silently reuses a number is worse than one that errors." <build>
+rem is HHmm, so in practice this only fires when two packages are built
+rem within the same clock-minute - the fix is to wait a minute and rebuild,
+rem not to override this check.
 if defined PREVBUILDNUM if "%BUILDNUM%"=="%PREVBUILDNUM%" (
     echo.
     echo *** PACKAGING FAILED ***
     echo Build number %BUILDNUM% is identical to the previous package's build number.
-    echo Two packages must never share a build number - refusing to produce a package.
+    echo Two packages built within the same minute produce the same HHmm value.
+    echo Wait at least a minute, then rebuild - do not override this check.
     exit /b 1
 )
 

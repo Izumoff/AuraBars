@@ -1,5 +1,6 @@
 #include "OptionsFrame.h"
 #include "Version.h"
+#include "BarGeometry.h"
 #include <algorithm>
 #include <commdlg.h>
 #include <cstdio>
@@ -161,6 +162,19 @@ namespace
         return v;
     }
 
+    // Distinguishes "the query failed" from "the query succeeded and
+    // returned an empty string" - AIMP_SERVICE_SKINSMAN_PROPID_SKIN reads
+    // empty for the default (built-in) skin, mirroring how
+    // IAIMPServiceSkinsManager.Select documents an empty string as meaning
+    // "default skin". Collapsing both cases into one empty std::wstring (as
+    // a bare return value would) made every default-skin bug report look
+    // like a broken skins-manager call.
+    struct SkinNameResult
+    {
+        bool queried = false; // true iff the SDK call chain itself succeeded
+        std::wstring name;    // meaningful only when queried is true; empty means "default skin"
+    };
+
     // Best-effort skin-file-name lookup via IAIMPServiceSkinsManager's
     // AIMP_SERVICE_SKINSMAN_PROPID_SKIN property, read through the sibling
     // IAIMPPropertyList interface on the same service object per the
@@ -168,31 +182,33 @@ namespace
     // which is always the AIMP UI/main thread, so the "query the skins
     // manager on the main thread only" requirement is satisfied by
     // construction - no explicit thread check needed here. Any failure at
-    // any step yields an empty string, which the caller turns into "n/a":
-    // a diagnostic field must never fail the whole Copy.
-    std::wstring GetActiveSkinNameForEnv()
+    // any step leaves queried=false, which the caller turns into "n/a": a
+    // diagnostic field must never fail the whole Copy.
+    SkinNameResult GetActiveSkinNameForEnv()
     {
+        SkinNameResult r;
+
         if (!g_Core)
-            return L"";
+            return r;
 
         IAIMPServiceSkinsManager* skinsManager = nullptr;
         if (FAILED(g_Core->QueryInterface(IID_IAIMPServiceSkinsManager, (void**)&skinsManager)) || !skinsManager)
-            return L"";
+            return r;
 
-        std::wstring result;
         IAIMPPropertyList* propList = nullptr;
         if (SUCCEEDED(skinsManager->QueryInterface(IID_IAIMPPropertyList, (void**)&propList)) && propList)
         {
             IAIMPString* name = nullptr;
-            if (SUCCEEDED(propList->GetValueAsObject(AIMP_SERVICE_SKINSMAN_PROPID_SKIN, IID_IAIMPString, (void**)&name)) && name)
-            {
-                result = name->GetData();
+            HRESULT hr = propList->GetValueAsObject(AIMP_SERVICE_SKINSMAN_PROPID_SKIN, IID_IAIMPString, (void**)&name);
+            r.queried = SUCCEEDED(hr);
+            if (r.queried && name)
+                r.name = name->GetData();
+            if (name)
                 name->Release();
-            }
             propList->Release();
         }
         skinsManager->Release();
-        return result;
+        return r;
     }
 
     // FormatInfo() is used instead of hand-decoding GetVersionID()'s packed
@@ -1446,13 +1462,21 @@ std::wstring COptionsFrame::BuildEnvironmentSection() const
         drawH = std::max(0, dispH - topMargin - bottomMargin - 2 * borderInset);
     }
 
+    // Delegates to the exact same ComputeBarGeometry() the renderer's
+    // ComputeBarLayout calls (BarGeometry.h) - this is what makes
+    // EnvEffectiveBarWidth/EnvEffectiveBarCount a report of what the
+    // renderer actually did, not a second, independently-drifting
+    // calculation. Reduces spacing then bar count (never below what makes
+    // each bar >= 7px, or below a single bar) whenever the requested count
+    // and spacing can't fit the drawable width - e.g. 20 bars at 8px
+    // spacing need 152px of gaps alone in a 144px-wide panel.
     int barW = -1;
+    int effectiveBarCount = -1;
     if (drawW >= 0)
     {
-        const int n = std::clamp(s.barCount, 8, 128);
-        const int spacing = std::clamp(s.barSpacing, 0, 20);
-        const int availWidth = std::max(0, drawW - spacing * (n - 1));
-        barW = availWidth / n;
+        BarGeometry geometry = ComputeBarGeometry(drawW, s.barCount, s.barSpacing);
+        barW = geometry.effectiveBarWidth;
+        effectiveBarCount = geometry.effectiveBarCount;
     }
 
     int segs = -1;
@@ -1474,17 +1498,32 @@ std::wstring COptionsFrame::BuildEnvironmentSection() const
         ReleaseDC(hwnd, dc);
     }
 
-    std::wstring skin = SingleLine(GetActiveSkinNameForEnv());
+    // n/a means the query itself failed; a successful query that returned
+    // an empty string means the active skin is the default (built-in) one -
+    // these are not the same thing (§3 diagnostic addendum).
+    SkinNameResult skinResult = GetActiveSkinNameForEnv();
+    std::wstring skin;
+    if (!skinResult.queried)
+        skin = L"n/a";
+    else if (skinResult.name.empty())
+        skin = L"Default (built-in)";
+    else
+        skin = SingleLine(skinResult.name);
+
     std::wstring aimpVersion = SingleLine(GetAimpVersionForEnv());
 
     std::wstring out;
     out += L"[Environment]\r\n";
-    out += L"EnvSkin="; out += skin.empty() ? L"n/a" : skin; out += L"\r\n";
+    out += L"EnvSkin="; out += skin; out += L"\r\n";
     out += L"EnvDisplayWidth="; out += NAOrInt(dispW); out += L"\r\n";
     out += L"EnvDisplayHeight="; out += NAOrInt(dispH); out += L"\r\n";
     out += L"EnvDrawableWidth="; out += NAOrInt(drawW); out += L"\r\n";
     out += L"EnvDrawableHeight="; out += NAOrInt(drawH); out += L"\r\n";
     out += L"EnvEffectiveBarWidth="; out += NAOrInt(barW); out += L"\r\n";
+    // Shows when ComputeBarGeometry had to reduce the bar count to make the
+    // row fit (never the stored NumberOfBars itself, which the dialog
+    // still shows unchanged) - same Env prefix rule, ignored on paste.
+    out += L"EnvEffectiveBarCount="; out += NAOrInt(effectiveBarCount); out += L"\r\n";
     out += L"EnvEffectiveSegments="; out += NAOrInt(segs); out += L"\r\n";
     out += L"EnvDpi="; out += std::to_wstring(dpi); out += L"\r\n";
     // Omitted entirely (not even as "n/a") when unobtainable, per §3.
