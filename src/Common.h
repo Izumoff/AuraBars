@@ -17,6 +17,8 @@
 #include "apiOptions.h"
 #include "apiTypes.h"
 #include "apiGUI.h"
+#include "apiSkins.h"
+#include <atomic>
 
 // Set once by CPlugin::Initialize, used by helpers that need to reach the
 // core (creating IAIMPString instances, resolving services) from anywhere
@@ -26,6 +28,17 @@ extern IAIMPCore* g_Core;
 // Set once in DllMain (DLL_PROCESS_ATTACH); needed to load the options
 // dialog template out of this DLL's own resources.
 extern HINSTANCE g_hInstance;
+
+// Cached display size from the visualization's Initialize/Resize calls -
+// consumed only by the "[Environment]" clipboard diagnostics block (see
+// OptionsFrame.cpp's BuildEnvironmentSection). The options dialog can be
+// opened while no visualization instance is running, and its render path
+// is documented by the SDK as not thread-safe / not provably the same
+// thread as the dialog's UI thread, so these are atomics rather than plain
+// ints. -1 means "never initialized this session" - a diagnostic field
+// must read as "n/a", never as a fake 0x0 measurement.
+extern std::atomic<int> g_EnvDisplayWidth;
+extern std::atomic<int> g_EnvDisplayHeight;
 
 // Owning wrapper around an IAIMPString*: releases on destruction, no copy.
 class AutoAIMPString

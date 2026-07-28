@@ -165,6 +165,11 @@ HRESULT WINAPI CVisualization::Initialize(int Width, int Height)
 {
     m_Width = Width;
     m_Height = Height;
+    // Cached for the options dialog's "[Environment]" diagnostics block,
+    // which can run while no visualization instance exists yet or while
+    // the panel sits at a stale size - see Common.h.
+    g_EnvDisplayWidth.store(Width);
+    g_EnvDisplayHeight.store(Height);
     m_AutoGainCeilingDbLeft.clear();
     m_AutoGainCeilingDbRight.clear();
     EnsureBackBuffer();
@@ -185,6 +190,8 @@ void WINAPI CVisualization::Resize(int NewWidth, int NewHeight)
 {
     m_Width = NewWidth;
     m_Height = NewHeight;
+    g_EnvDisplayWidth.store(NewWidth);
+    g_EnvDisplayHeight.store(NewHeight);
     EnsureBackBuffer();
     // Stale pixel coordinates from the old size are meaningless.
     m_PeakYLeft.clear();

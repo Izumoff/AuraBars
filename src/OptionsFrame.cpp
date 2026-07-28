@@ -1,5 +1,6 @@
 #include "OptionsFrame.h"
 #include "Version.h"
+#include <algorithm>
 #include <commdlg.h>
 #include <cstdio>
 #include <cstdlib>
@@ -136,6 +137,88 @@ namespace
         wchar_t buf[32];
         swprintf_s(buf, L"%.1f", v);
         return buf;
+    }
+
+    // --- "[Environment]" diagnostics block helpers (§3, "The [Environment]
+    // section - diagnostics, not settings") - these are host observations,
+    // not settings, so they live here rather than in SerializeSettings. ---
+
+    // Cascades "never initialized this session" (and any other unknown
+    // dimension) to "n/a" rather than a fake 0.
+    std::wstring NAOrInt(int v)
+    {
+        return v < 0 ? std::wstring(L"n/a") : std::to_wstring(v);
+    }
+
+    // A diagnostic value must never itself corrupt the INI line structure -
+    // defensive only, not expected to ever trigger for a skin filename or a
+    // version string.
+    std::wstring SingleLine(std::wstring v)
+    {
+        size_t cut = v.find_first_of(L"\r\n");
+        if (cut != std::wstring::npos)
+            v.resize(cut);
+        return v;
+    }
+
+    // Best-effort skin-file-name lookup via IAIMPServiceSkinsManager's
+    // AIMP_SERVICE_SKINSMAN_PROPID_SKIN property, read through the sibling
+    // IAIMPPropertyList interface on the same service object per the
+    // contract. Copy only ever runs from a dialog button click (OnChanged),
+    // which is always the AIMP UI/main thread, so the "query the skins
+    // manager on the main thread only" requirement is satisfied by
+    // construction - no explicit thread check needed here. Any failure at
+    // any step yields an empty string, which the caller turns into "n/a":
+    // a diagnostic field must never fail the whole Copy.
+    std::wstring GetActiveSkinNameForEnv()
+    {
+        if (!g_Core)
+            return L"";
+
+        IAIMPServiceSkinsManager* skinsManager = nullptr;
+        if (FAILED(g_Core->QueryInterface(IID_IAIMPServiceSkinsManager, (void**)&skinsManager)) || !skinsManager)
+            return L"";
+
+        std::wstring result;
+        IAIMPPropertyList* propList = nullptr;
+        if (SUCCEEDED(skinsManager->QueryInterface(IID_IAIMPPropertyList, (void**)&propList)) && propList)
+        {
+            IAIMPString* name = nullptr;
+            if (SUCCEEDED(propList->GetValueAsObject(AIMP_SERVICE_SKINSMAN_PROPID_SKIN, IID_IAIMPString, (void**)&name)) && name)
+            {
+                result = name->GetData();
+                name->Release();
+            }
+            propList->Release();
+        }
+        skinsManager->Release();
+        return result;
+    }
+
+    // FormatInfo() is used instead of hand-decoding GetVersionID()'s packed
+    // integer: apiCore.h documents no bit layout for it, and guessing one
+    // for a diagnostic field would be worse than omitting it. FormatInfo
+    // asks AIMP itself for a display-ready version string, so no
+    // assumption about internal encoding is needed. An empty result means
+    // "omit the key entirely", per §3.
+    std::wstring GetAimpVersionForEnv()
+    {
+        if (!g_Core)
+            return L"";
+
+        IAIMPServiceVersionInfo* verInfo = nullptr;
+        if (FAILED(g_Core->QueryInterface(IID_IAIMPServiceVersionInfo, (void**)&verInfo)) || !verInfo)
+            return L"";
+
+        std::wstring result;
+        IAIMPString* s = nullptr;
+        if (SUCCEEDED(verInfo->FormatInfo(&s)) && s)
+        {
+            result = s->GetData();
+            s->Release();
+        }
+        verInfo->Release();
+        return result;
     }
 
     // Window property name used to recover the COptionsFrame* from inside
@@ -360,6 +443,39 @@ namespace
         if (colon == std::wstring::npos)
             return L"";
         return Trim(line.substr(colon + 1));
+    }
+
+    // Pulls every "EnvXxx=..." line out of a pasted payload for the
+    // debug-log echo (§3: "a successful paste writes the incoming
+    // [Environment] values to the debug log"). Deliberately independent of
+    // ParseSettings' handler table and of section headers - it goes purely
+    // by the reserved "Env" key prefix, the same rule that lets the parser
+    // ignore this section with no section-name special case. This function
+    // never feeds anything back into settings; it only produces a string
+    // for AppendDebugLog.
+    std::vector<std::wstring> ExtractEnvironmentLines(const std::wstring& payload)
+    {
+        std::vector<std::wstring> result;
+        size_t pos = 0;
+        while (pos < payload.size())
+        {
+            size_t nl = payload.find(L'\n', pos);
+            std::wstring line = (nl == std::wstring::npos) ? payload.substr(pos) : payload.substr(pos, nl - pos);
+            pos = (nl == std::wstring::npos) ? payload.size() : nl + 1;
+
+            std::wstring trimmed = Trim(line);
+            if (trimmed.empty() || trimmed[0] == L';' || trimmed[0] == L'[')
+                continue;
+
+            size_t eq = trimmed.find(L'=');
+            if (eq == std::wstring::npos)
+                continue;
+
+            std::wstring key = Trim(trimmed.substr(0, eq));
+            if (key.size() >= 3 && IEquals(key.substr(0, 3), L"Env"))
+                result.push_back(trimmed);
+        }
+        return result;
     }
 }
 
@@ -1300,6 +1416,86 @@ ParseSettingsResult ParseSettings(const std::wstring& payload)
     return result;
 }
 
+std::wstring COptionsFrame::BuildEnvironmentSection() const
+{
+    const AuraBarsSettings& s = m_Working;
+
+    // Cached from the visualization's own Initialize/Resize (Common.h) -
+    // the dialog can be open with no visualization instance running yet
+    // this session, in which case both stay at their -1 "never
+    // initialized" sentinel and every derived value below cascades to n/a.
+    int dispW = g_EnvDisplayWidth.load();
+    int dispH = g_EnvDisplayHeight.load();
+    bool haveDims = dispW >= 0 && dispH >= 0;
+
+    int drawW = -1, drawH = -1;
+    if (haveDims)
+    {
+        // Mirrors the Mono-mode margin/border inset math in
+        // Visualization.cpp's Draw() - Stereo mode further splits this
+        // around the separator, but that per-channel split is more detail
+        // than a single diagnostic number needs; this is the same
+        // "drawable rectangle" concept either way.
+        const int leftMargin = std::clamp(s.leftMargin, 0, 100);
+        const int rightMargin = std::clamp(s.rightMargin, 0, 100);
+        const int topMargin = std::clamp(s.topMargin, 0, 100);
+        const int bottomMargin = std::clamp(s.bottomMargin, 0, 100);
+        const int borderInset = s.borderEnabled ? std::clamp(s.borderThickness, 1, 10) : 0;
+
+        drawW = std::max(0, dispW - leftMargin - rightMargin - 2 * borderInset);
+        drawH = std::max(0, dispH - topMargin - bottomMargin - 2 * borderInset);
+    }
+
+    int barW = -1;
+    if (drawW >= 0)
+    {
+        const int n = std::clamp(s.barCount, 8, 128);
+        const int spacing = std::clamp(s.barSpacing, 0, 20);
+        const int availWidth = std::max(0, drawW - spacing * (n - 1));
+        barW = availWidth / n;
+    }
+
+    int segs = -1;
+    if (drawH >= 0)
+    {
+        // Emitted in Smooth style too, as the count that would fit - the
+        // snapshot is always complete (§3).
+        const int segH = std::clamp(s.segmentHeight, 4, 20);
+        const int gap = std::clamp(s.segmentGap, 1, 8);
+        const int step = segH + gap;
+        segs = drawH / step;
+    }
+
+    int dpi = 96;
+    HWND hwnd = m_Form ? m_Form->GetHandle() : nullptr;
+    if (HDC dc = GetDC(hwnd))
+    {
+        dpi = GetDeviceCaps(dc, LOGPIXELSX);
+        ReleaseDC(hwnd, dc);
+    }
+
+    std::wstring skin = SingleLine(GetActiveSkinNameForEnv());
+    std::wstring aimpVersion = SingleLine(GetAimpVersionForEnv());
+
+    std::wstring out;
+    out += L"[Environment]\r\n";
+    out += L"EnvSkin="; out += skin.empty() ? L"n/a" : skin; out += L"\r\n";
+    out += L"EnvDisplayWidth="; out += NAOrInt(dispW); out += L"\r\n";
+    out += L"EnvDisplayHeight="; out += NAOrInt(dispH); out += L"\r\n";
+    out += L"EnvDrawableWidth="; out += NAOrInt(drawW); out += L"\r\n";
+    out += L"EnvDrawableHeight="; out += NAOrInt(drawH); out += L"\r\n";
+    out += L"EnvEffectiveBarWidth="; out += NAOrInt(barW); out += L"\r\n";
+    out += L"EnvEffectiveSegments="; out += NAOrInt(segs); out += L"\r\n";
+    out += L"EnvDpi="; out += std::to_wstring(dpi); out += L"\r\n";
+    // Omitted entirely (not even as "n/a") when unobtainable, per §3.
+    if (!aimpVersion.empty())
+    {
+        out += L"EnvAimpVersion="; out += aimpVersion; out += L"\r\n";
+    }
+    out += L"\r\n";
+    return out;
+}
+
 void COptionsFrame::CopySettingsToClipboard()
 {
     // Live dialog state including unapplied edits, not the last-persisted
@@ -1307,6 +1503,14 @@ void COptionsFrame::CopySettingsToClipboard()
     // here instead without touching g_Settings or ClampSettings.
     ReadControlsIntoWorking();
     std::wstring payload = SerializeSettings(m_Working);
+
+    // "[Environment]" comes first in the payload, ahead of the settings
+    // sections (§3) - spliced in right before the always-present [System]
+    // section rather than folded into SerializeSettings itself, since
+    // SerializeSettings must stay a pure function of AuraBarsSettings alone.
+    size_t insertPos = payload.find(L"[System]");
+    if (insertPos != std::wstring::npos)
+        payload.insert(insertPos, BuildEnvironmentSection());
 
     bool ok = false;
     if (OpenClipboard(m_Form ? m_Form->GetHandle() : nullptr))
@@ -1392,6 +1596,30 @@ void COptionsFrame::PasteSettingsFromClipboard()
                 std::wstring line = L"Paste settings from clipboard: payload version " + headerVersion +
                     L" differs from running version " + AURABARS_FULL_VERSION_WSTR;
                 AppendDebugLog(line.c_str());
+            }
+
+            // The [Environment] section is never applied to anything - no
+            // special case exists in ParseSettings for it, every Env* key
+            // is just an unrecognized key to the parser. This is purely an
+            // echo for the developer reading the log, per §3: "the incoming
+            // [Environment] values", logged only when the paste as a whole
+            // succeeded (ok is not yet set at this point, but a payload
+            // with recognized settings keys and an [Environment] block came
+            // from Copy, so gating on parsed.valid here mirrors that).
+            if (parsed.valid)
+            {
+                std::vector<std::wstring> envLines = ExtractEnvironmentLines(payload);
+                if (!envLines.empty())
+                {
+                    std::wstring line = L"Paste settings from clipboard: incoming [Environment] -";
+                    for (const std::wstring& envLine : envLines)
+                    {
+                        line += L' ';
+                        line += envLine;
+                        line += L';';
+                    }
+                    AppendDebugLog(line.c_str());
+                }
             }
         }
     }

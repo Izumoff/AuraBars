@@ -6,6 +6,16 @@ set "BUILD=%ROOT%build"
 set "PKGDIR=%ROOT%package"
 set "STAGE=%PKGDIR%\AuraBars"
 
+rem Captured before build.bat regenerates BuildNumber.h, so it can be
+rem compared against the freshly-generated number below (Code Contract
+rem Sec6: "fail the build loudly if the newly computed <build> equals the
+rem one already recorded from the previous package"). Left undefined on a
+rem fresh checkout with no BuildNumber.h yet - nothing to compare against.
+set "PREVBUILDNUM="
+set "PREVBUILDNUM_RAW="
+if exist "%ROOT%src\BuildNumber.h" for /f "tokens=3" %%A in ('findstr /C:"#define AURABARS_BUILD_NUMBER" "%ROOT%src\BuildNumber.h"') do set "PREVBUILDNUM_RAW=%%A"
+if defined PREVBUILDNUM_RAW set "PREVBUILDNUM=%PREVBUILDNUM_RAW:"=%"
+
 echo === Running full build (x64 + x86) to ensure fresh DLLs ===
 call "%ROOT%build.bat"
 if errorlevel 1 exit /b 1
@@ -31,8 +41,23 @@ if not defined BUILDNUM_RAW (
 )
 set "BUILDNUM=%BUILDNUM_RAW:"=%"
 
+rem Code Contract Sec6: "fail the build loudly if the newly computed
+rem <build> equals the one already recorded from the previous package - a
+rem packaging step that silently reuses a number is worse than one that
+rem errors." build.bat's counter is monotonic by construction, so this
+rem should be structurally unreachable; it's kept as an explicit,
+rem independent check anyway rather than trusting that invariant silently.
+if defined PREVBUILDNUM if "%BUILDNUM%"=="%PREVBUILDNUM%" (
+    echo.
+    echo *** PACKAGING FAILED ***
+    echo Build number %BUILDNUM% is identical to the previous package's build number.
+    echo Two packages must never share a build number - refusing to produce a package.
+    exit /b 1
+)
+
 set "FULLVERSION=%VERSION%.%BUILDNUM%"
-echo Version: %FULLVERSION%
+echo.
+echo === Package version: %FULLVERSION% ===
 
 rem Name/Author/Topic/Description are read from the same Version.h that the
 rem About tab's C++ code reads, so the packaged metadata and the in-app
@@ -73,7 +98,7 @@ if errorlevel 1 exit /b 1
 
 rem AuraBars.txt (unlike ReadMe.txt) is always regenerated fresh - it's
 rem never hand-edited. Version line sourced from the same Version.h /
-rem BuildNumber.h read above, so it can never drift from the System tab.
+rem BuildNumber.h read above, so it can never drift from the About tab.
 if exist "%STAGE%\AuraBars.txt" del /f /q "%STAGE%\AuraBars.txt"
 > "%STAGE%\AuraBars.txt" echo Name: %NAME%
 >> "%STAGE%\AuraBars.txt" echo Version: %FULLVERSION%
@@ -95,3 +120,4 @@ if errorlevel 1 exit /b 1
 
 echo.
 echo Package created: %PKGDIR%\AuraBars.aimppack
+echo === Package version: %FULLVERSION% ===

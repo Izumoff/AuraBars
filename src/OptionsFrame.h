@@ -107,6 +107,13 @@ private:
     // declared above.
     void CopySettingsToClipboard();
     void PasteSettingsFromClipboard();
+    // Builds the "[Environment]" diagnostics block Copy prepends ahead of
+    // SerializeSettings' output. Deliberately kept out of SerializeSettings
+    // itself: these are live host observations (skin, display size, AIMP
+    // version), not settings, and SerializeSettings must stay a pure
+    // function of AuraBarsSettings alone (see §3/§7 forward note about
+    // reusing it for 2.4.x presets, which must never carry diagnostics).
+    std::wstring BuildEnvironmentSection() const;
 
     std::atomic<long> m_RefCount{1};
     IAIMPServiceUI* m_UIService = nullptr; // borrowed for the duration of CreateFrame's Build* calls; not held long-term

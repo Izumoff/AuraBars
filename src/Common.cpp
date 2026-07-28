@@ -4,6 +4,8 @@
 
 IAIMPCore* g_Core = nullptr;
 HINSTANCE g_hInstance = nullptr;
+std::atomic<int> g_EnvDisplayWidth{-1};
+std::atomic<int> g_EnvDisplayHeight{-1};
 
 IAIMPString* MakeAIMPString(const wchar_t* text)
 {
