@@ -3,4 +3,4 @@
 // Local clock time at build, HHmm, 24-hour, always exactly four
 // characters with any leading zero preserved (Code Contract Sec6).
 // Deliberately not monotonic - do not "correct" this value.
-#define AURABARS_BUILD_NUMBER "1322"
+#define AURABARS_BUILD_NUMBER "2022"

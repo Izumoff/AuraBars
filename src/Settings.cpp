@@ -89,6 +89,56 @@ namespace
     }
 }
 
+bool operator==(const AuraBarsSettings& a, const AuraBarsSettings& b)
+{
+    return a.barCount == b.barCount &&
+        a.amplitudeScaling == b.amplitudeScaling &&
+        a.dbFloor == b.dbFloor &&
+        a.dbCeiling == b.dbCeiling &&
+        a.autoGainCeiling == b.autoGainCeiling &&
+        a.barSmoothing == b.barSmoothing &&
+        a.barSmoothingAttack == b.barSmoothingAttack &&
+        a.barSmoothingDecay == b.barSmoothingDecay &&
+        a.barStyle == b.barStyle &&
+        a.barColorMode == b.barColorMode &&
+        a.barColorSolid == b.barColorSolid &&
+        a.barGradientTop == b.barGradientTop &&
+        a.barGradientBottom == b.barGradientBottom &&
+        a.backgroundStyle == b.backgroundStyle &&
+        a.backgroundColor == b.backgroundColor &&
+        a.gridLines == b.gridLines &&
+        a.gridLineColor == b.gridLineColor &&
+        a.gridLineSpacing == b.gridLineSpacing &&
+        a.gridLineOpacity == b.gridLineOpacity &&
+        a.gridLineStyle == b.gridLineStyle &&
+        a.peakMarkers == b.peakMarkers &&
+        a.peakMarkerColor == b.peakMarkerColor &&
+        a.peakFallSpeed == b.peakFallSpeed &&
+        a.peakMarkerThickness == b.peakMarkerThickness &&
+        a.peakMarkerHeightSegments == b.peakMarkerHeightSegments &&
+        a.peakSmoothMotion == b.peakSmoothMotion &&
+        a.barSpacing == b.barSpacing &&
+        a.segmentGap == b.segmentGap &&
+        a.segmentHeight == b.segmentHeight &&
+        a.backgroundBarsEnabled == b.backgroundBarsEnabled &&
+        a.backgroundBarColorMode == b.backgroundBarColorMode &&
+        a.backgroundBarColorSolid == b.backgroundBarColorSolid &&
+        a.backgroundBarGradientTop == b.backgroundBarGradientTop &&
+        a.backgroundBarGradientBottom == b.backgroundBarGradientBottom &&
+        a.debugLogging == b.debugLogging &&
+        a.channelMode == b.channelMode &&
+        a.topMargin == b.topMargin &&
+        a.bottomMargin == b.bottomMargin &&
+        a.leftMargin == b.leftMargin &&
+        a.rightMargin == b.rightMargin &&
+        a.borderEnabled == b.borderEnabled &&
+        a.borderColor == b.borderColor &&
+        a.borderThickness == b.borderThickness &&
+        a.separatorEnabled == b.separatorEnabled &&
+        a.separatorColor == b.separatorColor &&
+        a.separatorThickness == b.separatorThickness;
+}
+
 void ClampSettings(AuraBarsSettings& s)
 {
     s.barCount = std::clamp(s.barCount, 8, 128);

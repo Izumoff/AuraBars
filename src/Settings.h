@@ -9,9 +9,17 @@ enum class AmplitudeScaling { Linear = 0, Logarithmic = 1 };
 enum class GridLineStyle { Dashed = 0, Solid = 1 };
 enum class ChannelMode { Mono = 0, Stereo = 1 };
 
+// These member initializers mirror the "Pandemic" built-in preset payload
+// (src/Presets.cpp) value-for-value, since Pandemic is the factory default
+// set (Code Contract §2/§3). They exist for LoadSettings'/ParseSettings'
+// per-missing-key fallback, not as a second implementation of "Reset to
+// Defaults" - that button loads the Pandemic preset directly
+// (COptionsFrame::ResetToDefaults), through the exact same parser path as
+// every other preset. If Pandemic's payload ever changes, update these to
+// match by hand; there is no automated link between the two forms.
 struct AuraBarsSettings
 {
-    int barCount = 20;                                  // 8-128
+    int barCount = 18;                                  // 8-128
     AmplitudeScaling amplitudeScaling = AmplitudeScaling::Logarithmic;
     double dbFloor = -40.0;                            // dB, -100.0 to -20.0, Logarithmic only
     double dbCeiling = 0.0;                            // dB, -20.0 to 0.0, Logarithmic only
@@ -32,13 +40,13 @@ struct AuraBarsSettings
     int gridLineOpacity = 100;                          // %, 0-100
     GridLineStyle gridLineStyle = GridLineStyle::Dashed;
     bool peakMarkers = true;
-    COLORREF peakMarkerColor = RGB(0xFD, 0x42, 0x2D);
+    COLORREF peakMarkerColor = RGB(0xFE, 0x7A, 0x2C);
     double peakFallSpeed = 1.5;                        // px/frame, 0.1-10.0
-    int peakMarkerThickness = 3;                       // px, 1-10, Smooth only
+    int peakMarkerThickness = 1;                       // px, 1-10, Smooth only
     int peakMarkerHeightSegments = 1;                  // segments, 1-3, LED only, ignored when peakSmoothMotion is on
-    bool peakSmoothMotion = false;                     // LED only: continuous float peak position (like Smooth style) instead of segment-snapped
-    int barSpacing = 8;                                // px, 0-20
-    int segmentGap = 2;                                // px, 1-8, LED only
+    bool peakSmoothMotion = true;                      // LED only: continuous float peak position (like Smooth style) instead of segment-snapped
+    int barSpacing = 1;                                // px, 0-20
+    int segmentGap = 1;                                // px, 1-8, LED only
     int segmentHeight = 4;                             // px, 4-20, LED only
     bool backgroundBarsEnabled = false;                // always-full-height "unlit LED" layer drawn behind the front bar
     ColorMode backgroundBarColorMode = ColorMode::Gradient;
@@ -47,17 +55,27 @@ struct AuraBarsSettings
     COLORREF backgroundBarGradientBottom = RGB(0x2A, 0x1A, 0x18);
     bool debugLogging = false;                         // once/sec, writes sample bars' raw+dB values to %TEMP%\AuraBars_debug.log
     ChannelMode channelMode = ChannelMode::Mono;
-    int topMargin = 8;                                 // px, 0-100 (was percent-based; old saved value intentionally NOT migrated)
-    int bottomMargin = 8;                              // px, 0-100
-    int leftMargin = 8;                                // px, 0-100; Mono: left edge of the spectrum. Stereo: left edge of the Left channel, AND gap between the Left channel's right edge and the Separator
-    int rightMargin = 8;                               // px, 0-100; Mono: right edge of the spectrum. Stereo: gap between the Separator and the Right channel's left edge, AND right edge of the Right channel
-    bool borderEnabled = true;
+    int topMargin = 1;                                 // px, 0-100 (was percent-based; old saved value intentionally NOT migrated)
+    int bottomMargin = 1;                               // px, 0-100
+    int leftMargin = 1;                                 // px, 0-100; Mono: left edge of the spectrum. Stereo: left edge of the Left channel, AND gap between the Left channel's right edge and the Separator
+    int rightMargin = 1;                                // px, 0-100; Mono: right edge of the spectrum. Stereo: gap between the Separator and the Right channel's left edge, AND right edge of the Right channel
+    bool borderEnabled = false;
     COLORREF borderColor = RGB(0x30, 0x30, 0x30);
-    int borderThickness = 2;                           // px, 1-10
+    int borderThickness = 1;                           // px, 1-10
     bool separatorEnabled = true;                       // Stereo mode only
     COLORREF separatorColor = RGB(0xB0, 0x69, 0x1C);
-    int separatorThickness = 2;                        // px, 1-10
+    int separatorThickness = 1;                        // px, 1-10
 };
+
+// Field-by-field equality - deliberately not memcmp: mixed int/double/bool/
+// enum/COLORREF members mean the compiler is free to insert padding, whose
+// bytes are indeterminate between two otherwise-identical instances built
+// via different code paths (e.g. one parsed from a preset payload, one
+// copied from live dialog controls). Used by the settings-dialog "dirty"
+// indicator (Code Contract §3, "Settings presets") to compare live control
+// state against the most recently loaded preset's parsed values.
+bool operator==(const AuraBarsSettings& a, const AuraBarsSettings& b);
+inline bool operator!=(const AuraBarsSettings& a, const AuraBarsSettings& b) { return !(a == b); }
 
 // Live settings shared by the visualization and the options dialog: the
 // dialog writes here on Save and the renderer reads it every frame, so

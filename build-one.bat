@@ -39,11 +39,11 @@ cl /nologo /std:c++17 /EHsc /W3 /O2 /MD /DUNICODE /D_UNICODE ^
    /I "%SDKINC%" /I "%SRC%" ^
    /Fo"%OUT%\\" ^
    /c ^
-   "%SRC%\Common.cpp" "%SRC%\Settings.cpp" "%SRC%\BarGeometry.cpp" "%SRC%\Visualization.cpp" "%SRC%\OptionsFrame.cpp" "%SRC%\Plugin.cpp" "%SRC%\DllMain.cpp"
+   "%SRC%\Common.cpp" "%SRC%\Settings.cpp" "%SRC%\BarGeometry.cpp" "%SRC%\Presets.cpp" "%SRC%\Visualization.cpp" "%SRC%\OptionsFrame.cpp" "%SRC%\Plugin.cpp" "%SRC%\DllMain.cpp"
 if errorlevel 1 exit /b 1
 
 link /nologo /DLL /MACHINE:%MACHINE% /DEF:"%SRC%\AuraBars.def" /OUT:"%OUT%\AuraBars.dll" ^
-   "%OUT%\Common.obj" "%OUT%\Settings.obj" "%OUT%\BarGeometry.obj" "%OUT%\Visualization.obj" "%OUT%\OptionsFrame.obj" "%OUT%\Plugin.obj" "%OUT%\DllMain.obj" "%OUT%\AuraBars.res" ^
+   "%OUT%\Common.obj" "%OUT%\Settings.obj" "%OUT%\BarGeometry.obj" "%OUT%\Presets.obj" "%OUT%\Visualization.obj" "%OUT%\OptionsFrame.obj" "%OUT%\Plugin.obj" "%OUT%\DllMain.obj" "%OUT%\AuraBars.res" ^
    user32.lib gdi32.lib comdlg32.lib comctl32.lib msimg32.lib ole32.lib uuid.lib
 if errorlevel 1 exit /b 1
 

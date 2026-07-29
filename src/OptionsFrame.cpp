@@ -1,6 +1,7 @@
 #include "OptionsFrame.h"
 #include "Version.h"
 #include "BarGeometry.h"
+#include "Presets.h"
 #include <algorithm>
 #include <commdlg.h>
 #include <cstdio>
@@ -75,6 +76,33 @@ namespace
             return def;
         int v = def;
         combo->GetValueAsInt32(AIMPUI_COMBOBOX_PROPID_ITEMINDEX, &v);
+        return v;
+    }
+
+    // GetComboIndex only falls back to `def` when the COM call itself fails
+    // - a *successful* call can still legitimately return -1 ("no item
+    // selected") or, in principle, an index past the end of the item list.
+    // Casting either of those straight into an enum (as every combo-backed
+    // AuraBarsSettings field used to) writes an out-of-range enum value into
+    // settings that then gets rendered, persisted, and re-applied to the
+    // control on every subsequent PopulateControls() - silently, since
+    // nothing ever checked the range. This wrapper is the single point where
+    // that gets caught: an invalid read keeps the setting at its current
+    // value and logs why, instead of ever manufacturing a garbage enum.
+    int GetValidatedComboIndex(IAIMPUIComboBox* combo, int def, int maxValidIndex, const wchar_t* fieldName)
+    {
+        int v = GetComboIndex(combo, def);
+        if (v < 0 || v > maxValidIndex)
+        {
+            if (g_Settings.debugLogging)
+            {
+                wchar_t buf[192];
+                swprintf_s(buf, L"%s combo read back invalid index %d (valid range 0-%d) - keeping current value %d",
+                    fieldName, v, maxValidIndex, def);
+                AppendDebugLog(buf);
+            }
+            return def;
+        }
         return v;
     }
 
@@ -569,6 +597,7 @@ HWND WINAPI COptionsFrame::CreateFrame(HWND ParentWnd)
 
     BuildTabs();
     PopulateControls();
+    ResolvePresetSelector();
 
     m_UIService->Release();
     m_UIService = nullptr;
@@ -621,6 +650,7 @@ void WINAPI COptionsFrame::Notification(int ID)
         case AIMP_SERVICE_OPTIONSDIALOG_NOTIFICATION_LOAD:
             m_Working = g_Settings;
             PopulateControls();
+            ResolvePresetSelector();
             break;
 
         case AIMP_SERVICE_OPTIONSDIALOG_NOTIFICATION_SAVE:
@@ -682,6 +712,13 @@ void WINAPI COptionsFrame::OnChanged(IUnknown* Sender)
     if (SenderIs(Sender, m_SeparatorColorBtn))   { PickColor(m_SeparatorColorBtn, m_Working.separatorColor); return; }
     if (SenderIs(Sender, m_CopyClipboardBtn))    { CopySettingsToClipboard(); return; }
     if (SenderIs(Sender, m_PasteClipboardBtn))   { PasteSettingsFromClipboard(); return; }
+    if (SenderIs(Sender, m_PresetLoadBtn))       { LoadPreset(GetComboIndex(m_PresetCombo, 0)); return; }
+
+    // Browsing the preset dropdown alone applies nothing - only Load does
+    // (Code Contract §3). Explicit no-op so this doesn't fall through to
+    // the catch-all NotifyModified() below and mark the frame dirty for a
+    // selection change that hasn't actually touched any setting.
+    if (SenderIs(Sender, m_PresetCombo))         { return; }
 
     // Combos/checkboxes that gate other controls' enabled state.
     if (SenderIs(Sender, m_BarStyleCombo) || SenderIs(Sender, m_BarColorModeCombo) ||
@@ -759,18 +796,23 @@ IAIMPUICheckBox* COptionsFrame::CreateCheckBox(IAIMPUIWinControl* parent, int x,
 
 IAIMPUIComboBox* COptionsFrame::CreateCombo(IAIMPUIWinControl* parent, int x, int y, int w, int h, const wchar_t* a, const wchar_t* b)
 {
+    return CreateComboItems(parent, x, y, w, h, { a, b });
+}
+
+IAIMPUIComboBox* COptionsFrame::CreateComboItems(IAIMPUIWinControl* parent, int x, int y, int w, int h, const std::vector<const wchar_t*>& items)
+{
     IAIMPUIComboBox* combo = nullptr;
     if (FAILED(m_UIService->CreateControl(m_Form, parent, nullptr, static_cast<IAIMPUIChangeEvents*>(this), IID_IAIMPUIComboBox, (void**)&combo)) || !combo)
         return nullptr;
     SetBounds(combo, x, y, w, h);
     combo->SetValueAsInt32(AIMPUI_COMBOBOX_PROPID_STYLE, AIMPUI_COMBOBOX_STYLE_LIST);
 
-    AutoAIMPString sa(MakeAIMPString(a));
-    AutoAIMPString sb(MakeAIMPString(b));
-    if (sa.Get())
-        combo->Add(sa.Get(), 0);
-    if (sb.Get())
-        combo->Add(sb.Get(), 0);
+    for (const wchar_t* item : items)
+    {
+        AutoAIMPString s(MakeAIMPString(item));
+        if (s.Get())
+            combo->Add(s.Get(), 0);
+    }
 
     m_OwnedControls.push_back(static_cast<IUnknown*>(combo));
     return combo;
@@ -898,11 +940,53 @@ void COptionsFrame::BuildAboutTab(IAIMPUIWinControl* tab)
 
 void COptionsFrame::BuildSystemTab(IAIMPUIWinControl* tab)
 {
-    m_ResetDefaultsBtn = CreateButton(tab, 10, 8, 150, kButtonH, L"Reset to Defaults");
-    m_CopyClipboardBtn = CreateButton(tab, 10, 8 + kRowH, 190, kButtonH, L"Copy settings to clipboard");
-    m_PasteClipboardBtn = CreateButton(tab, 10 + 190 + 10, 8 + kRowH, 200, kButtonH, L"Paste settings from clipboard");
+    // Wider than the standard settings-row groupW (kFieldX + kFieldW + 10):
+    // this tab's content - the two clipboard buttons especially - needs
+    // more horizontal room, the same way the About tab already uses a
+    // wider column for its own prose. All three groups below share this
+    // width so they still line up with each other.
+    const int groupW = 430;
 
-    m_DebugLogCheck = CreateCheckBox(tab, 10, 8 + 2 * kRowH, 320, 20, L"Debug logging (writes to %TEMP%\\AuraBars_debug.log, 1/sec)");
+    // Presets first (most-used control), Diagnostics last (rarest) - Code
+    // Contract §3.
+    const int presetRows = 3;
+    IAIMPUIGroupBox* presetGroup = CreateGroupBox(tab, 10, 8, groupW, kGroupContentTop + presetRows * kRowH + kGroupContentBottom, L"Presets");
+
+    LabelRow(presetGroup, kGroupContentTop, 10, L"Preset:");
+    // Item 0's displayed label is derived (preset name + " (default)"), not
+    // a second hardcoded string, so it can never drift from kPresets[0]
+    // (Code Contract §3: "the displayed label must derive from the preset
+    // name plus a suffix").
+    std::wstring defaultLabel = std::wstring(kPresets[kDefaultPresetIndex].name) + L" (default)";
+    // This row is exempt from the shared kFieldX/kFieldW label/value grid
+    // that every other tab's rows align to: it's a dropdown plus action
+    // buttons, not a label/value settings row, so nothing depends on its
+    // value column lining up with the other six tabs. kFieldX/kFieldW
+    // themselves are untouched - widening those would reflow every tab.
+    // presetComboW is a static constant sized to fit "Pandemic (default)",
+    // the longest entry, rather than measured at runtime: a runtime
+    // measurement pass here previously (2.5.1639) sent a live message to
+    // the form's own window between control creation and item population
+    // and is suspected of blanking three unrelated dropdowns - see
+    // CreateCombo's header comment. A static constant can't do that.
+    const int presetComboX = kFieldX;
+    const int presetComboW = 150;
+    m_PresetCombo = CreateComboItems(presetGroup, presetComboX, kGroupContentTop, presetComboW, 60,
+        { defaultLabel.c_str(), kPresets[1].name, kPresets[2].name, kPresets[3].name, kPresets[4].name });
+    m_PresetLoadBtn = CreateButton(presetGroup, presetComboX + presetComboW + 10, kGroupContentTop, 55, kButtonH, L"Load");
+
+    m_PresetStatusLabel = CreateLabel(presetGroup, 10, kGroupContentTop + kRowH, groupW - 20, 12, L"");
+
+    m_ResetDefaultsBtn = CreateButton(presetGroup, 10, kGroupContentTop + 2 * kRowH, 150, kButtonH, L"Reset to Defaults");
+
+    int transferY = 8 + (kGroupContentTop + presetRows * kRowH + kGroupContentBottom) + 10;
+    IAIMPUIGroupBox* transferGroup = CreateGroupBox(tab, 10, transferY, groupW, kGroupContentTop + kRowH + kGroupContentBottom, L"Settings Transfer");
+    m_CopyClipboardBtn = CreateButton(transferGroup, 10, kGroupContentTop, 190, kButtonH, L"Copy settings to clipboard");
+    m_PasteClipboardBtn = CreateButton(transferGroup, 10 + 190 + 10, kGroupContentTop, 200, kButtonH, L"Paste settings from clipboard");
+
+    int diagY = transferY + (kGroupContentTop + kRowH + kGroupContentBottom) + 10;
+    IAIMPUIGroupBox* diagGroup = CreateGroupBox(tab, 10, diagY, groupW, kGroupContentTop + kRowH + kGroupContentBottom, L"Diagnostics");
+    m_DebugLogCheck = CreateCheckBox(diagGroup, 10, kGroupContentTop, groupW - 20, 20, L"Debug logging (%TEMP%\\AuraBars_debug.log)");
 }
 
 void COptionsFrame::BuildScalingTab(IAIMPUIWinControl* tab)
@@ -1078,8 +1162,65 @@ void COptionsFrame::BuildLayoutTab(IAIMPUIWinControl* tab)
     m_SeparatorThicknessEdit = CreateEdit(frameGroup, kFieldX, kGroupContentTop + 3 * kRowH, kFieldW, kFieldH);
 }
 
+void COptionsFrame::EnableAllControls()
+{
+    // Mirrors every control UpdateEnabledStates() conditionally toggles,
+    // unconditionally enabled. Whenever a full settings struct is about to
+    // be pushed to the dialog (preset load, paste, reset), this must run
+    // before a single value is written - see PopulateControls().
+    SetEnabled(m_DbFloorEdit, true);
+    SetEnabled(m_DbFloorLabel, true);
+    SetEnabled(m_DbCeilingEdit, true);
+    SetEnabled(m_DbCeilingLabel, true);
+    SetEnabled(m_AutoGainCheck, true);
+
+    SetEnabled(m_BarSmoothingAttackEdit, true);
+    SetEnabled(m_BarSmoothingAttackLabel, true);
+    SetEnabled(m_BarSmoothingDecayEdit, true);
+    SetEnabled(m_BarSmoothingDecayLabel, true);
+
+    SetEnabled(m_BarColorBtn, true);
+    SetEnabled(m_BarColorLabel, true);
+    SetEnabled(m_BarGradTopBtn, true);
+    SetEnabled(m_BarGradTopLabel, true);
+    SetEnabled(m_BarGradBottomBtn, true);
+    SetEnabled(m_BarGradBottomLabel, true);
+
+    SetEnabled(m_BackgroundBarColorBtn, true);
+    SetEnabled(m_BackgroundBarColorLabel, true);
+    SetEnabled(m_BackgroundBarGradTopBtn, true);
+    SetEnabled(m_BackgroundBarGradTopLabel, true);
+    SetEnabled(m_BackgroundBarGradBottomBtn, true);
+    SetEnabled(m_BackgroundBarGradBottomLabel, true);
+
+    SetEnabled(m_PeakThicknessEdit, true);
+    SetEnabled(m_PeakThicknessLabel, true);
+    SetEnabled(m_PeakHeightSegEdit, true);
+    SetEnabled(m_PeakHeightSegLabel, true);
+    SetEnabled(m_PeakSmoothMotionCheck, true);
+    SetEnabled(m_SegmentGapEdit, true);
+    SetEnabled(m_SegmentGapLabel, true);
+    SetEnabled(m_SegmentHeightEdit, true);
+    SetEnabled(m_SegmentHeightLabel, true);
+
+    SetEnabled(m_SeparatorEnabledCheck, true);
+    SetEnabled(m_SeparatorColorBtn, true);
+    SetEnabled(m_SeparatorThicknessLabel, true);
+    SetEnabled(m_SeparatorThicknessEdit, true);
+}
+
 void COptionsFrame::PopulateControls()
 {
+    // Control write ordering (Code Contract §3, regression watch): a
+    // disabled control may silently discard a write. Enable everything
+    // first, so no value about to be written below lands on a control that
+    // was left disabled by whatever settings were on screen *before* this
+    // call - that write would be dropped, and the UpdateEnabledStates() call
+    // at the end would then enable the control showing its stale prior
+    // value. This is what made loading a preset twice "fix" the first
+    // load's misses: the second pass found every control already enabled.
+    EnableAllControls();
+
     SetEditInt(m_BarCountEdit, m_Working.barCount);
     SetComboIndex(m_AmpScaleCombo, (int)m_Working.amplitudeScaling);
     SetEditFloat(m_DbFloorEdit, m_Working.dbFloor);
@@ -1137,19 +1278,19 @@ void COptionsFrame::PopulateControls()
 void COptionsFrame::ReadControlsIntoWorking()
 {
     m_Working.barCount = GetEditInt(m_BarCountEdit, m_Working.barCount);
-    m_Working.amplitudeScaling = (AmplitudeScaling)GetComboIndex(m_AmpScaleCombo, (int)m_Working.amplitudeScaling);
+    m_Working.amplitudeScaling = (AmplitudeScaling)GetValidatedComboIndex(m_AmpScaleCombo, (int)m_Working.amplitudeScaling, 1, L"AmplitudeScaling");
     m_Working.dbFloor = GetEditFloat(m_DbFloorEdit, m_Working.dbFloor);
     m_Working.dbCeiling = GetEditFloat(m_DbCeilingEdit, m_Working.dbCeiling);
     m_Working.autoGainCeiling = GetCheckState(m_AutoGainCheck);
     m_Working.barSmoothing = GetCheckState(m_BarSmoothingCheck);
     m_Working.barSmoothingAttack = GetEditFloat(m_BarSmoothingAttackEdit, m_Working.barSmoothingAttack);
     m_Working.barSmoothingDecay = GetEditFloat(m_BarSmoothingDecayEdit, m_Working.barSmoothingDecay);
-    m_Working.barStyle = (BarStyle)GetComboIndex(m_BarStyleCombo, (int)m_Working.barStyle);
-    m_Working.barColorMode = (ColorMode)GetComboIndex(m_BarColorModeCombo, (int)m_Working.barColorMode);
-    m_Working.backgroundBarColorMode = (ColorMode)GetComboIndex(m_BackgroundBarColorModeCombo, (int)m_Working.backgroundBarColorMode);
-    m_Working.backgroundStyle = (BackgroundStyle)GetComboIndex(m_BackStyleCombo, (int)m_Working.backgroundStyle);
-    m_Working.gridLineStyle = (GridLineStyle)GetComboIndex(m_GridStyleCombo, (int)m_Working.gridLineStyle);
-    m_Working.channelMode = (ChannelMode)GetComboIndex(m_ChannelModeCombo, (int)m_Working.channelMode);
+    m_Working.barStyle = (BarStyle)GetValidatedComboIndex(m_BarStyleCombo, (int)m_Working.barStyle, 1, L"BarStyle");
+    m_Working.barColorMode = (ColorMode)GetValidatedComboIndex(m_BarColorModeCombo, (int)m_Working.barColorMode, 1, L"BarColorMode");
+    m_Working.backgroundBarColorMode = (ColorMode)GetValidatedComboIndex(m_BackgroundBarColorModeCombo, (int)m_Working.backgroundBarColorMode, 1, L"BackgroundBarColorMode");
+    m_Working.backgroundStyle = (BackgroundStyle)GetValidatedComboIndex(m_BackStyleCombo, (int)m_Working.backgroundStyle, 1, L"BackgroundStyle");
+    m_Working.gridLineStyle = (GridLineStyle)GetValidatedComboIndex(m_GridStyleCombo, (int)m_Working.gridLineStyle, 1, L"GridLineStyle");
+    m_Working.channelMode = (ChannelMode)GetValidatedComboIndex(m_ChannelModeCombo, (int)m_Working.channelMode, 1, L"ChannelMode");
 
     m_Working.gridLines = GetCheckState(m_GridLinesCheck);
     m_Working.backgroundBarsEnabled = GetCheckState(m_BackgroundBarsCheck);
@@ -1250,16 +1391,19 @@ void COptionsFrame::PickColor(IAIMPUIButton* button, COLORREF& target)
 
 void COptionsFrame::ResetToDefaults()
 {
-    // Resets only the in-dialog working copy, same as every other edit
-    // here - the user still has to Apply/OK to persist it, and Cancel
-    // still backs out cleanly.
-    m_Working = AuraBarsSettings{};
-    PopulateControls();
-    NotifyModified();
+    // "Reset to Defaults" IS "load the Pandemic preset" (Code Contract §3)
+    // - not a second, independently-maintained copy of the default values.
+    // Confirmation-if-dirty and the dropdown sync both live inside
+    // LoadPreset, so this is just that one call - kept alongside the
+    // dropdown despite the redundancy because "reset to defaults" is an
+    // affordance users look for by name.
+    LoadPreset(kDefaultPresetIndex);
 }
 
 void COptionsFrame::NotifyModified()
 {
+    UpdatePresetStatusLabel();
+
     if (!g_Core)
         return;
 
@@ -1269,6 +1413,147 @@ void COptionsFrame::NotifyModified()
         svc->FrameModified(this);
         svc->Release();
     }
+}
+
+void COptionsFrame::LoadPreset(int index)
+{
+    if (index < 0 || index >= kPresetCount)
+        return;
+
+    // Captured before anything below (IsPresetModified included) touches a
+    // live control: this is the exclusion-restore's only source of truth
+    // for the two excluded keys. m_Working.channelMode is already kept in
+    // sync with the live combo via the OnChanged -> NotifyModified ->
+    // ReadControlsIntoWorking chain that fires whenever the user actually
+    // changes it, so reading it here is equivalent to reading the control -
+    // without the round trip. The previous version instead re-derived these
+    // from m_Working *after* the IsPresetModified() call below, which reads
+    // every control live (including this one) to compute the dirty flag; a
+    // -1 out of that read (no control-index guard existed on this path
+    // originally) got treated as ChannelMode's "current value" and written
+    // straight back into the same combo, blanking it - and each later load
+    // re-read that blank and repeated the cycle. Snapshotting first removes
+    // the round trip entirely, independent of whatever caused any given -1.
+    ChannelMode preservedChannelMode = m_Working.channelMode;
+    bool preservedDebugLogging = m_Working.debugLogging;
+
+    // Load and Reset to Defaults both discard uncommitted edits across
+    // every tab, and from the System tab the user can't see what they're
+    // about to lose - so both confirm first, but only when there's
+    // actually something to lose (Code Contract §3). Reuses the exact
+    // dirty flag the status label already computes; declining leaves
+    // everything - controls, dropdown, dirty state - untouched.
+    if (IsPresetModified())
+    {
+        std::wstring msg = L"Loading \"" + std::wstring(kPresets[index].name) +
+            L"\" will discard your unsaved changes on every tab. Continue?";
+        HWND owner = m_Form ? m_Form->GetHandle() : nullptr;
+        if (MessageBoxW(owner, msg.c_str(), L"AuraBars", MB_YESNO | MB_ICONWARNING) != IDYES)
+            return;
+    }
+
+    ParseSettingsResult parsed = ParseSettings(kPresets[index].payload);
+    if (!parsed.valid)
+        return; // never half-apply - an empty/placeholder preset changes nothing (§3 validation rule, same as Paste)
+
+    // Two keys are excluded on preset load (Code Contract §3): restore the
+    // dialog's current values for these rather than the preset's. Channel
+    // mode and debug logging are deliberate user/diagnostic choices, not an
+    // aesthetic a colour preset should override - this is the only
+    // behavioral difference between loading a preset and pasting a
+    // snapshot; everything else shares the parser and the control-writing
+    // path, including the dependent-control refresh below. Uses the
+    // snapshot captured above, not m_Working as it stands here - see that
+    // comment for why.
+    parsed.settings.channelMode = preservedChannelMode;
+    parsed.settings.debugLogging = preservedDebugLogging;
+
+    m_Working = parsed.settings;
+    PopulateControls(); // writes every control and re-runs UpdateEnabledStates() for dependent-control gating
+
+    // Only now, once the load has actually committed, does the dropdown
+    // move - so a user who declines the prompt above never sees the
+    // selector jump to a preset that wasn't actually applied.
+    SetComboIndex(m_PresetCombo, index);
+    m_LoadedPresetIndex = index;
+    m_LoadedPresetSettings = m_Working; // dirty-indicator baseline: settings as actually applied, i.e. after the restore above
+
+    NotifyModified(); // also refreshes the preset status label (folds UpdatePresetStatusLabel())
+}
+
+int COptionsFrame::ResolveMatchingPreset(const AuraBarsSettings& current) const
+{
+    for (int i = 0; i < kPresetCount; ++i)
+    {
+        ParseSettingsResult parsed = ParseSettings(kPresets[i].payload);
+        if (!parsed.valid)
+            continue;
+        // Same exclusion as loading: a preset's identity is its other 44
+        // keys, not whatever ChannelMode/DebugLogging its payload happens
+        // to carry.
+        parsed.settings.channelMode = current.channelMode;
+        parsed.settings.debugLogging = current.debugLogging;
+        if (parsed.settings == current)
+            return i;
+    }
+    return -1;
+}
+
+void COptionsFrame::ResolvePresetSelector()
+{
+    // Preset selection is never persisted (Code Contract §3) - every time
+    // the dialog (re)opens, figure out from the actual settings alone
+    // which preset (if any) they exactly match, rather than trusting
+    // whatever the dropdown happened to show last.
+    int match = ResolveMatchingPreset(m_Working);
+    if (match >= 0)
+    {
+        m_LoadedPresetIndex = match;
+        m_LoadedPresetSettings = m_Working; // exact match, so this is a clean (non-"modified") baseline
+    }
+    // else: leave m_LoadedPresetIndex exactly as it was - whatever this
+    // AIMP session's last Load/Reset set it to (in memory only; COptionsFrame
+    // itself is a single long-lived instance across dialog open/close
+    // cycles, so this "remembers" within a run without ever touching
+    // config), or -1 if nothing has been loaded yet. The dirty check below
+    // then correctly shows "(modified)" against that baseline once one
+    // exists, or shows nothing if one never did.
+
+    int shown = (m_LoadedPresetIndex >= 0) ? m_LoadedPresetIndex : kDefaultPresetIndex;
+    SetComboIndex(m_PresetCombo, shown);
+    UpdatePresetStatusLabel();
+}
+
+bool COptionsFrame::IsPresetModified()
+{
+    if (m_LoadedPresetIndex < 0)
+        return false;
+
+    // Compares *live control state*, not the last-synced m_Working, per §3
+    // ("compare live control state to the loaded preset's parsed values").
+    ReadControlsIntoWorking();
+    return m_Working != m_LoadedPresetSettings;
+}
+
+void COptionsFrame::UpdatePresetStatusLabel()
+{
+    if (!m_PresetStatusLabel)
+        return;
+
+    // Shown only when the live controls differ from the loaded preset -
+    // when they match, the label would just repeat the name already
+    // visible in the dropdown beside it (Code Contract §3). Setting empty
+    // text rather than touching the control's bounds is what reserves the
+    // row's height either way, so nothing below shifts as it appears and
+    // disappears.
+    if (m_LoadedPresetIndex < 0 || !IsPresetModified())
+    {
+        SetText(m_PresetStatusLabel, AIMPUI_LABEL_PROPID_TEXT, L"");
+        return;
+    }
+
+    std::wstring text = std::wstring(kPresets[m_LoadedPresetIndex].name) + L" (modified)";
+    SetText(m_PresetStatusLabel, AIMPUI_LABEL_PROPID_TEXT, text.c_str());
 }
 
 void CALLBACK COptionsFrame::ClipboardTimerProc(HWND hwnd, UINT /*uMsg*/, UINT_PTR idEvent, DWORD /*dwTime*/)
