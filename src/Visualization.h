@@ -70,10 +70,14 @@ private:
     // Stereo-right uses its own set, so switching channel modes or having
     // differently-loud L/R content never cross-contaminates decay state
     // between them.
+    // dt: wall-clock seconds since the previous Draw() call (Code Contract
+    // §7 step 2 / §1), measured once per Draw and passed down - never
+    // re-measured per bar or per channel. Feeds the smoothing-coefficient
+    // frame-rate conversion inside; see ConvertSmoothingCoefficient.
     void ComputeBarLayout(const RECT& area, const TAIMPVisualData* data, int spectrumChannel,
                            std::vector<float>& peakState, std::vector<float>& autoGainState,
                            std::vector<float>& smoothedState,
-                           bool emitDebugLog, std::vector<BarLayout>& out);
+                           bool emitDebugLog, double dt, std::vector<BarLayout>& out);
     // bounds: the region grid lines are actually drawn/confined within
     // (a channel's inner rect). backgroundRef: the full panel rect, used
     // only so BackgroundColorAtY's gradient interpolation matches what
@@ -95,8 +99,10 @@ private:
 
     // TEMP DIAGNOSTIC - frame-cadence measurement, see Draw()'s call site.
     // Not part of the Code Contract; remove this method and its members
-    // once the units question it exists to answer is settled.
-    void LogCadenceSample();
+    // once the units question it exists to answer is settled. now: the
+    // single QPC read Draw() already took this call for dt - reused here
+    // rather than reading QueryPerformanceCounter a second time.
+    void LogCadenceSample(LARGE_INTEGER now);
 
     std::atomic<long> m_RefCount{1};
 
@@ -130,10 +136,23 @@ private:
     // it reflects the previous frame's value - up to one frame stale.
     int m_LastEffectiveBarCount = 0;
 
+    // QueryPerformanceFrequency(), captured once in Initialize() and never
+    // re-read (the OS guarantees it's fixed for the life of the process).
+    // Permanent - shared by the frame-rate-independence dt below (always
+    // active) and the TEMP DIAGNOSTIC cadence logging further down (only
+    // when DebugLogging is on); do not remove this one alongside that block.
+    LARGE_INTEGER m_QpcFrequency{};
+    // Frame-rate independence (Code Contract §7 step 2 / §1): previous
+    // Draw() call's QPC timestamp and whether one exists yet. Reset (via
+    // m_HasLastFrameQpc = false) in Initialize() and Resize() - "no
+    // previous timestamp" per the contract, not merely "a large dt".
+    LARGE_INTEGER m_LastFrameQpc{};
+    bool m_HasLastFrameQpc = false;
+
     // TEMP DIAGNOSTIC - frame-cadence measurement (see LogCadenceSample).
-    // Remove this whole block once the units decision it's here to settle
-    // is made; none of it belongs in the Code Contract.
-    LARGE_INTEGER m_QpcFrequency{};         // QueryPerformanceFrequency(), captured once when cadence logging (re)starts
+    // Remove this whole block (but not m_QpcFrequency above, which is now
+    // permanent) once the units decision it's here to settle is made; none
+    // of it belongs in the Code Contract.
     bool m_CadenceActive = false;           // mirrors g_Settings.debugLogging as observed by the cadence path; false->true is "just (re)started"
     LARGE_INTEGER m_LastDrawQpc{};          // QPC timestamp of the previous Draw() call
     // Wall-clock emission target: advanced by exactly one QPC-frequency's

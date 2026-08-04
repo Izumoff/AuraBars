@@ -9,6 +9,17 @@ rem PATH/LIB/INCLUDE changes for one arch can never leak into the other.
 set "TARGETS=%~1"
 if "%TARGETS%"=="" set "TARGETS=x64 x86"
 
+rem Captured before BuildNumber.h is regenerated below, so package-build.bat
+rem (invoked automatically at the end of a dual-architecture run) can fail
+rem loudly if the freshly-generated number collides with the immediately
+rem preceding run's (Code Contract Sec6: two packages built within the same
+rem clock-minute produce the same HHmm value). Left undefined on a fresh
+rem checkout with no BuildNumber.h yet - nothing to compare against.
+set "PREVBUILDNUM="
+set "PREVBUILDNUM_RAW="
+if exist "%~dp0src\BuildNumber.h" for /f "tokens=3" %%A in ('findstr /C:"#define AURABARS_BUILD_NUMBER" "%~dp0src\BuildNumber.h"') do set "PREVBUILDNUM_RAW=%%A"
+if defined PREVBUILDNUM_RAW set "PREVBUILDNUM=%PREVBUILDNUM_RAW:"=%"
+
 rem Generated once per run (not per-architecture, so x86 and x64 always
 rem share the identical build number) and included by both Version.h (for
 rem the About tab) and package.bat (for AuraBars.txt), so there is exactly
@@ -61,3 +72,19 @@ for %%A in (%TARGETS%) do (
 
 echo.
 echo All builds succeeded.
+
+rem Packaging is automatic, not a separate opt-in step - but only after a
+rem genuine dual-architecture run (both DLLs must exist), which is exactly
+rem what the default no-argument invocation produces. A single-arch run
+rem ("build.bat x64") only has one of the two DLLs packaging needs, so it
+rem deliberately does not trigger this.
+if /I "%TARGETS%"=="x64 x86" (
+    echo.
+    echo === Packaging ===
+    call "%~dp0package-build.bat" "%PREVBUILDNUM%"
+    if errorlevel 1 (
+        echo.
+        echo *** BUILD FAILED: packaging step failed - see above. ***
+        exit /b 1
+    )
+)

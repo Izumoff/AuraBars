@@ -116,6 +116,30 @@ namespace
 
         return NormalizeDb(LinearToDb(linearValue), (float)g_Settings.dbFloor, ceilingDb);
     }
+
+    // Frame-rate independence (Code Contract §7 step 2): the user's
+    // Bar smoothing attack/decay settings are frame-rate-agnostic 0.0-1.0
+    // coefficients defined against a 32fps baseline (dt == 1/32). Applying
+    // them as a raw per-frame blend factor - as the original code did -
+    // means the *same* coefficient smooths harder at low frame rates
+    // (fewer, bigger steps) and softer at high ones (more, smaller steps),
+    // so the visible smoothing speed silently depends on how fast Draw()
+    // happens to be called. This converts the configured coefficient into
+    // the equivalent effective rate for the actual dt just measured, so
+    // smoothing settles at the same wall-clock speed regardless of frame
+    // rate. At dt == 1/32 (32fps) this is a no-op: effective == coefficient
+    // to within floating-point noise, by construction (exponent == 1.0).
+    //
+    // coefficient==1.0 (instant/no smoothing) was verified not to produce
+    // NaN in MSVC's pow(): base is exactly 0.0, and pow(0, x) is 0.0 for
+    // every tested positive x (including a degenerate dt of 0, where the
+    // exponent is exactly 0.0 and pow(0,0)==1.0, giving effective==0.0) -
+    // never NaN.
+    double ConvertSmoothingCoefficient(double coefficient, double dt)
+    {
+        double effective = 1.0 - std::pow(1.0 - coefficient, dt * 32.0);
+        return std::clamp(effective, 0.0, 1.0);
+    }
 }
 
 CVisualization::~CVisualization()
@@ -182,6 +206,16 @@ HRESULT WINAPI CVisualization::Initialize(int Width, int Height)
     m_AutoGainCeilingDbLeft.clear();
     m_AutoGainCeilingDbRight.clear();
     EnsureBackBuffer();
+
+    // Frame-rate independence (Code Contract §7 step 2): fixed for the
+    // life of the process, so read exactly once here rather than lazily
+    // per-Draw or (as the cadence diagnostic used to) only when
+    // DebugLogging happens to be on. m_HasLastFrameQpc = false makes the
+    // very next Draw() use the dt == 1/32 fallback, per the contract's
+    // "first Draw after Initialize or Resize has no previous timestamp".
+    QueryPerformanceFrequency(&m_QpcFrequency);
+    m_HasLastFrameQpc = false;
+
     return S_OK;
 }
 
@@ -207,6 +241,13 @@ void WINAPI CVisualization::Resize(int NewWidth, int NewHeight)
     m_PeakYRight.clear();
     m_AutoGainCeilingDbLeft.clear();
     m_AutoGainCeilingDbRight.clear();
+
+    // Frame-rate independence (Code Contract §7 step 2): "first Draw after
+    // Initialize or Resize has no previous timestamp" - the resize gap
+    // itself isn't real render-to-render time, so don't let it become one
+    // giant dt (which the 100ms clamp would just flatten anyway) or a
+    // false near-zero one against a stale timestamp.
+    m_HasLastFrameQpc = false;
 }
 
 void CVisualization::EnsureBackBuffer()
@@ -240,12 +281,37 @@ void CVisualization::ReleaseBackBuffer()
 
 void WINAPI CVisualization::Draw(HCANVAS Canvas, PAIMPVisualData Data)
 {
+    // Single QueryPerformanceCounter read for the whole call, shared by the
+    // frame-rate-independence dt below and (when DebugLogging is on) the
+    // cadence diagnostic further down - never re-read per bar or per
+    // channel, and never a second timer alongside this one.
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+
+    // Frame-rate independence (Code Contract §7 step 2 / §1): dt is the
+    // measured wall-clock interval since the previous Draw() call. Feeds
+    // ConvertSmoothingCoefficient inside ComputeBarLayout, converting the
+    // user's frame-rate-agnostic 0.0-1.0 attack/decay settings into the
+    // effective per-frame rate for whatever dt actually turned out to be.
+    // Clamped to 100ms so a stall (window drag, alt-tab, a genuinely dropped
+    // frame) can't make the very next frame jump instead of smoothing.
+    double dt;
+    if (!m_HasLastFrameQpc || m_QpcFrequency.QuadPart <= 0)
+        dt = 1.0 / 32.0; // no previous timestamp - first Draw after Initialize/Resize (or QPC unavailable)
+    else
+    {
+        dt = (double)(now.QuadPart - m_LastFrameQpc.QuadPart) / (double)m_QpcFrequency.QuadPart;
+        dt = std::min(dt, 0.1);
+    }
+    m_LastFrameQpc = now;
+    m_HasLastFrameQpc = true;
+
     // TEMP DIAGNOSTIC - see LogCadenceSample(). Placed before every early
     // return so it times every actual call AIMP makes, not just the ones
     // that go on to paint. Remove this call (and LogCadenceSample) once the
     // cadence question it exists to answer is settled.
     if (g_Settings.debugLogging)
-        LogCadenceSample();
+        LogCadenceSample(now);
     else
         m_CadenceActive = false; // so the next enable re-inits cleanly instead of measuring across the gap
 
@@ -329,8 +395,8 @@ void WINAPI CVisualization::Draw(HCANVAS Canvas, PAIMPVisualData Data)
         RECT rightInner = insetRect(rightRect);
 
         std::vector<BarLayout> leftBars, rightBars;
-        ComputeBarLayout(leftInner, Data, 0, m_PeakYLeft, m_AutoGainCeilingDbLeft, m_SmoothedLeft, true, leftBars);
-        ComputeBarLayout(rightInner, Data, 1, m_PeakYRight, m_AutoGainCeilingDbRight, m_SmoothedRight, false, rightBars);
+        ComputeBarLayout(leftInner, Data, 0, m_PeakYLeft, m_AutoGainCeilingDbLeft, m_SmoothedLeft, true, dt, leftBars);
+        ComputeBarLayout(rightInner, Data, 1, m_PeakYRight, m_AutoGainCeilingDbRight, m_SmoothedRight, false, dt, rightBars);
 
         bars.reserve(leftBars.size() + rightBars.size());
         bars.insert(bars.end(), leftBars.begin(), leftBars.end());
@@ -356,7 +422,7 @@ void WINAPI CVisualization::Draw(HCANVAS Canvas, PAIMPVisualData Data)
             barArea.right = barArea.left;
 
         RECT inner = insetRect(barArea);
-        ComputeBarLayout(inner, Data, -1, m_PeakYLeft, m_AutoGainCeilingDbLeft, m_SmoothedLeft, true, bars);
+        ComputeBarLayout(inner, Data, -1, m_PeakYLeft, m_AutoGainCeilingDbLeft, m_SmoothedLeft, true, dt, bars);
         borderRects = { barArea };
         innerRects = { inner };
         barsByRegion = { bars };
@@ -627,24 +693,23 @@ void CVisualization::LogDebugSample(const DebugBarSample& bass, const DebugBarSa
 // TEMP DIAGNOSTIC - frame-cadence measurement. Exists only to settle a units
 // question (is the Draw call rate stable, and does it vary with drawable
 // area?). Not part of the Code Contract - delete this method, its call site
-// in Draw(), the m_Cadence*/m_LastDrawQpc/m_QpcFrequency/m_LastPlaybackActive
-// members in Visualization.h, and the apiPlayer.h include once that question
-// is answered.
+// in Draw(), and the m_Cadence*/m_LastDrawQpc/m_LastPlaybackActive members in
+// Visualization.h once that question is answered. m_QpcFrequency is now
+// permanent (frame-rate independence depends on it) - do not delete it.
 //
 // Called once per Draw() when DebugLogging is on (see Draw()'s call site,
 // which also resets m_CadenceActive when logging is off so a later re-enable
-// starts a fresh window instead of measuring across the disabled gap).
+// starts a fresh window instead of measuring across the disabled gap). now
+// is the single QPC read Draw() already took for dt - reused here rather
+// than calling QueryPerformanceCounter a second time this frame.
 // Writes distinctly-prefixed lines to the same %TEMP%\AuraBars_debug.log
 // as LogDebugSample, via AppendDebugLog:
 //   CADENCE-INIT       once, the first Draw() after logging (re)starts - QPC frequency
 //   CADENCE-NOPLAYBACK edge-triggered - Draw fired while the player isn't in the Playing state, or resumed
 //   CADENCE            once/sec - frame count and interval stats for the second just completed
 // ============================================================================
-void CVisualization::LogCadenceSample()
+void CVisualization::LogCadenceSample(LARGE_INTEGER now)
 {
-    LARGE_INTEGER now;
-    QueryPerformanceCounter(&now);
-
     int playerState = AIMP_PLAYER_STATE_STOPPED;
     IAIMPServicePlayer* player = nullptr;
     if (g_Core && SUCCEEDED(g_Core->QueryInterface(IID_IAIMPServicePlayer, (void**)&player)) && player)
@@ -656,10 +721,10 @@ void CVisualization::LogCadenceSample()
 
     if (!m_CadenceActive)
     {
-        // Just (re)started: capture the frequency once and open a fresh
-        // window, rather than computing an interval against a stale
-        // m_LastDrawQpc left over from before logging was off.
-        QueryPerformanceFrequency(&m_QpcFrequency);
+        // Just (re)started: open a fresh window rather than computing an
+        // interval against a stale m_LastDrawQpc left over from before
+        // logging was off. m_QpcFrequency itself was already captured once
+        // in Initialize() - not re-read here anymore.
         wchar_t initLine[128];
         swprintf_s(initLine, L"CADENCE-INIT qpc_freq=%lld", (long long)m_QpcFrequency.QuadPart);
         AppendDebugLog(initLine);
@@ -748,7 +813,7 @@ void CVisualization::LogCadenceSample()
 void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* data, int spectrumChannel,
                                        std::vector<float>& peakState, std::vector<float>& autoGainState,
                                        std::vector<float>& smoothedState,
-                                       bool emitDebugLog, std::vector<BarLayout>& out)
+                                       bool emitDebugLog, double dt, std::vector<BarLayout>& out)
 {
     // Shared with BuildEnvironmentSection() (OptionsFrame.cpp) via
     // BarGeometry.h/.cpp, so EnvEffectiveBarWidth/EnvEffectiveBarCount in a
@@ -760,6 +825,13 @@ void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* d
     const int drawableWidth = (int)(area.right - area.left);
     const BarGeometry geometry = ComputeBarGeometry(drawableWidth, g_Settings.barCount, g_Settings.barSpacing);
     const int n = geometry.effectiveBarCount;
+
+    // Frame-rate independence (Code Contract §7 step 2): converted once per
+    // Draw call, not once per bar - dt and the two configured coefficients
+    // are the same for every bar in this region, so ConvertSmoothingCoefficient
+    // only needs to run twice here rather than 2*n times in the loop below.
+    const double effectiveAttack = ConvertSmoothingCoefficient(g_Settings.barSmoothingAttack, dt);
+    const double effectiveDecay = ConvertSmoothingCoefficient(g_Settings.barSmoothingDecay, dt);
 
     // TEMP DIAGNOSTIC - feeds LogCadenceSample's "bars=" field with the
     // count actually rendered (post fit-invariant), not g_Settings.barCount.
@@ -969,11 +1041,15 @@ void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* d
         // while the bar height lags smoothly behind it. Peak markers track
         // this for free: they're derived from the resulting scaled bar
         // height below, not a separate raw-magnitude read.
+        //
+        // rate uses effectiveAttack/effectiveDecay (Code Contract §7 step
+        // 2), not the raw configured coefficients directly - see
+        // ConvertSmoothingCoefficient above the per-bar loop.
         float scalingInput = rawValue;
         if (g_Settings.barSmoothing)
         {
             float& smoothed = smoothedState[i];
-            double rate = (rawValue >= smoothed) ? g_Settings.barSmoothingAttack : g_Settings.barSmoothingDecay;
+            double rate = (rawValue >= smoothed) ? effectiveAttack : effectiveDecay;
             smoothed += (float)rate * (rawValue - smoothed);
             scalingInput = smoothed;
         }
@@ -1034,6 +1110,17 @@ void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* d
         {
             m_LastDebugLogTick = now;
             LogDebugSample(debugBass, debugMid, debugTreble, n);
+
+            // TEMP DIAGNOSTIC - frame-rate-independence verification (Code
+            // Contract §7 step 2). Confirms effective == configured at
+            // ~32fps (dt ~= 1/32) and that effective rises above configured
+            // at lower frame rates. Remove this block once that's signed
+            // off; it's not part of the Code Contract.
+            wchar_t smoothLine[192];
+            swprintf_s(smoothLine,
+                L"SMOOTHDT dt_ms=%.2f attack_cfg=%.4f attack_eff=%.4f decay_cfg=%.4f decay_eff=%.4f",
+                dt * 1000.0, g_Settings.barSmoothingAttack, effectiveAttack, g_Settings.barSmoothingDecay, effectiveDecay);
+            AppendDebugLog(smoothLine);
         }
     }
 }
