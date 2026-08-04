@@ -236,9 +236,17 @@ void WINAPI CVisualization::Resize(int NewWidth, int NewHeight)
     g_EnvDisplayWidth.store(NewWidth);
     g_EnvDisplayHeight.store(NewHeight);
     EnsureBackBuffer();
-    // Stale pixel coordinates from the old size are meaningless.
+    // Stale pixel coordinates from the old size are meaningless. Velocity
+    // and remaining hold are cleared alongside position (not left to
+    // persist, unlike m_Smoothed*) so a freshly-reset position never pairs
+    // with leftover fall speed/hold from a very differently-sized panel -
+    // all three describe one coherent physics state (Code Contract §7 step 3).
     m_PeakYLeft.clear();
+    m_PeakVelocityLeft.clear();
+    m_PeakHoldRemainingLeft.clear();
     m_PeakYRight.clear();
+    m_PeakVelocityRight.clear();
+    m_PeakHoldRemainingRight.clear();
     m_AutoGainCeilingDbLeft.clear();
     m_AutoGainCeilingDbRight.clear();
 
@@ -395,8 +403,8 @@ void WINAPI CVisualization::Draw(HCANVAS Canvas, PAIMPVisualData Data)
         RECT rightInner = insetRect(rightRect);
 
         std::vector<BarLayout> leftBars, rightBars;
-        ComputeBarLayout(leftInner, Data, 0, m_PeakYLeft, m_AutoGainCeilingDbLeft, m_SmoothedLeft, true, dt, leftBars);
-        ComputeBarLayout(rightInner, Data, 1, m_PeakYRight, m_AutoGainCeilingDbRight, m_SmoothedRight, false, dt, rightBars);
+        ComputeBarLayout(leftInner, Data, 0, m_PeakYLeft, m_PeakVelocityLeft, m_PeakHoldRemainingLeft, m_AutoGainCeilingDbLeft, m_SmoothedLeft, true, dt, leftBars);
+        ComputeBarLayout(rightInner, Data, 1, m_PeakYRight, m_PeakVelocityRight, m_PeakHoldRemainingRight, m_AutoGainCeilingDbRight, m_SmoothedRight, false, dt, rightBars);
 
         bars.reserve(leftBars.size() + rightBars.size());
         bars.insert(bars.end(), leftBars.begin(), leftBars.end());
@@ -422,7 +430,7 @@ void WINAPI CVisualization::Draw(HCANVAS Canvas, PAIMPVisualData Data)
             barArea.right = barArea.left;
 
         RECT inner = insetRect(barArea);
-        ComputeBarLayout(inner, Data, -1, m_PeakYLeft, m_AutoGainCeilingDbLeft, m_SmoothedLeft, true, dt, bars);
+        ComputeBarLayout(inner, Data, -1, m_PeakYLeft, m_PeakVelocityLeft, m_PeakHoldRemainingLeft, m_AutoGainCeilingDbLeft, m_SmoothedLeft, true, dt, bars);
         borderRects = { barArea };
         innerRects = { inner };
         barsByRegion = { bars };
@@ -811,7 +819,8 @@ void CVisualization::LogCadenceSample(LARGE_INTEGER now)
 }
 
 void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* data, int spectrumChannel,
-                                       std::vector<float>& peakState, std::vector<float>& autoGainState,
+                                       std::vector<float>& peakState, std::vector<float>& velocityState,
+                                       std::vector<float>& holdState, std::vector<float>& autoGainState,
                                        std::vector<float>& smoothedState,
                                        bool emitDebugLog, double dt, std::vector<BarLayout>& out)
 {
@@ -840,6 +849,14 @@ void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* d
 
     if ((int)peakState.size() != n)
         peakState.assign(n, (float)area.bottom);
+    // Peak marker gravity (Code Contract §7 step 3): velocity/hold reset
+    // to "no fall in progress, nothing to hold" alongside a freshly-sized
+    // position array - a bar-count change is exactly the same kind of
+    // discontinuity as a resize for this state.
+    if ((int)velocityState.size() != n)
+        velocityState.assign(n, 0.0f);
+    if ((int)holdState.size() != n)
+        holdState.assign(n, 0.0f);
     if ((int)autoGainState.size() != n)
         autoGainState.assign(n, (float)g_Settings.dbCeiling);
     if ((int)smoothedState.size() != n)
@@ -1081,20 +1098,61 @@ void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* d
         barRect.bottom = area.bottom;
         barRect.top = area.bottom - barHeightPx;
 
-        // Peak marker: snaps up instantly to a louder bar, falls at the
-        // configured speed otherwise (both in device pixels/frame). The
-        // decay step is clamped to the current frame's own barTopY (not
-        // just area.bottom) - without that clamp, a bar rising toward an
-        // still-decaying peak faster than the peak falls could leave the
-        // decayed peak numerically past (i.e. visually below) the bar's
-        // current top for that one frame, which reads as the bar
-        // rendering taller than its own peak marker.
+        // Peak marker gravity (Code Contract §7 step 3), runs after
+        // barRect.top - i.e. after this frame's smoothed bar value - is
+        // already computed above (Code Contract §3 frame-ordering rule:
+        // getting this backwards caused two shipped bugs previously).
+        //
+        // Coordinate note: peakY is device Y like barRect.top - smaller is
+        // higher/louder, larger is toward the floor. The contract's motion
+        // model is phrased in "height above the floor" terms (position
+        // *decreases* as the marker falls); translated to device Y, a fall
+        // *increases* peakY, and a re-trigger toward a taller bar decreases
+        // it. velocity is stored as a non-negative fall-speed magnitude in
+        // both modes, never a signed device-Y rate.
         float& peakY = peakState[i];
+        float& velocity = velocityState[i];
+        float& holdRemainingMs = holdState[i];
         float barTopY = (float)barRect.top;
-        if (barTopY < peakY)
+
+        if (barTopY <= peakY)
+        {
+            // Re-trigger: the bar has caught up to (or passed) the marker.
+            // Snap, reset velocity and hold, nothing else this frame -
+            // rejected: no overshoot above the bar, no bounce.
             peakY = barTopY;
-        else
-            peakY = std::min(peakY + (float)g_Settings.peakFallSpeed, barTopY);
+            velocity = 0.0f;
+            holdRemainingMs = (float)g_Settings.peakHoldTime;
+        }
+        else if (holdRemainingMs > 0.0f)
+        {
+            // Hold: marker stays exactly where it is, in both fall modes.
+            holdRemainingMs = std::max(0.0f, holdRemainingMs - (float)(dt * 1000.0));
+        }
+        else if (g_Settings.peakFallMode == PeakFallMode::Constant)
+        {
+            peakY += (float)(g_Settings.peakFallSpeedPxPerSec * dt);
+        }
+        else // Gravity
+        {
+            velocity += (float)(g_Settings.peakGravity * dt);
+            // Terminal velocity - a full-height fall in a quarter second.
+            // Internal only: not a user setting, not persisted. Without
+            // it a marker falling the height of a very tall (e.g. 4K)
+            // window reaches an absurd speed before landing.
+            const float terminalVelocity = 4.0f * (float)totalHeight;
+            velocity = std::min(velocity, terminalVelocity);
+            peakY += velocity * (float)dt;
+        }
+
+        // Clamp to the floor; velocity resets to 0 on landing so a later
+        // fall (after a paused/quiet stretch) starts clean rather than
+        // carrying leftover speed into what should read as a fresh drop.
+        if (peakY >= (float)area.bottom)
+        {
+            peakY = (float)area.bottom;
+            velocity = 0.0f;
+        }
 
         peakY = std::max(peakY, (float)area.top + kPeakTopClearancePx);
 

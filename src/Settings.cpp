@@ -31,7 +31,15 @@ namespace
     const wchar_t* kKeyGridLineStyle         = L"AuraBars\\GridLineStyle";
     const wchar_t* kKeyPeakMarkers           = L"AuraBars\\PeakMarkers";
     const wchar_t* kKeyPeakMarkerColor       = L"AuraBars\\PeakMarkerColor";
-    const wchar_t* kKeyPeakFallSpeed         = L"AuraBars\\PeakFallSpeed";
+    // New key name, not "PeakFallSpeed" (Code Contract §7 step 3): the old
+    // key stored px/frame, this one stores px/s - reusing the old name
+    // would have an old saved 1.5 silently reinterpreted as 1.5px/s (a
+    // crawl) instead of falling back to the new default. The rename makes
+    // the old value simply unrecognized, discarded by the unknown-key rule.
+    const wchar_t* kKeyPeakFallMode          = L"AuraBars\\PeakFallMode";
+    const wchar_t* kKeyPeakFallSpeedPxPerSec = L"AuraBars\\PeakFallSpeedPxPerSec";
+    const wchar_t* kKeyPeakGravity           = L"AuraBars\\PeakGravity";
+    const wchar_t* kKeyPeakHoldTime          = L"AuraBars\\PeakHoldTime";
     const wchar_t* kKeyPeakMarkerThickness   = L"AuraBars\\PeakMarkerThickness";
     const wchar_t* kKeyPeakMarkerHeightSegs  = L"AuraBars\\PeakMarkerHeightSegments";
     const wchar_t* kKeyPeakSmoothMotion      = L"AuraBars\\PeakSmoothMotion";
@@ -121,7 +129,10 @@ bool operator==(const AuraBarsSettings& a, const AuraBarsSettings& b)
         a.gridLineStyle == b.gridLineStyle &&
         a.peakMarkers == b.peakMarkers &&
         a.peakMarkerColor == b.peakMarkerColor &&
-        a.peakFallSpeed == b.peakFallSpeed &&
+        a.peakFallMode == b.peakFallMode &&
+        a.peakFallSpeedPxPerSec == b.peakFallSpeedPxPerSec &&
+        a.peakGravity == b.peakGravity &&
+        a.peakHoldTime == b.peakHoldTime &&
         a.peakMarkerThickness == b.peakMarkerThickness &&
         a.peakMarkerHeightSegments == b.peakMarkerHeightSegments &&
         a.peakSmoothMotion == b.peakSmoothMotion &&
@@ -166,7 +177,9 @@ void ClampSettings(AuraBarsSettings& s)
         s.dbCeiling = s.dbFloor + 1.0;
     s.barSmoothingAttack = std::clamp(s.barSmoothingAttack, 0.0, 1.0);
     s.barSmoothingDecay = std::clamp(s.barSmoothingDecay, 0.0, 1.0);
-    s.peakFallSpeed = std::clamp(s.peakFallSpeed, 0.1, 10.0);
+    s.peakFallSpeedPxPerSec = std::clamp(s.peakFallSpeedPxPerSec, 3.0, 320.0);
+    s.peakGravity = std::clamp(s.peakGravity, 10.0, 500.0);
+    s.peakHoldTime = std::clamp(s.peakHoldTime, 0, 1000);
     s.peakMarkerThickness = std::clamp(s.peakMarkerThickness, 1, 10);
     s.peakMarkerHeightSegments = std::clamp(s.peakMarkerHeightSegments, 1, 3);
     s.barSpacing = std::clamp(s.barSpacing, 0, 20);
@@ -215,7 +228,10 @@ void LoadSettings(IAIMPServiceConfig* cfg, AuraBarsSettings& s)
     s.gridLineStyle = (GridLineStyle)ReadInt(cfg, kKeyGridLineStyle, (int)def.gridLineStyle);
     s.peakMarkers = ReadInt(cfg, kKeyPeakMarkers, def.peakMarkers ? 1 : 0) != 0;
     s.peakMarkerColor = (COLORREF)ReadInt(cfg, kKeyPeakMarkerColor, (int)def.peakMarkerColor);
-    s.peakFallSpeed = ReadFloat(cfg, kKeyPeakFallSpeed, def.peakFallSpeed);
+    s.peakFallMode = (PeakFallMode)ReadInt(cfg, kKeyPeakFallMode, (int)def.peakFallMode);
+    s.peakFallSpeedPxPerSec = ReadFloat(cfg, kKeyPeakFallSpeedPxPerSec, def.peakFallSpeedPxPerSec);
+    s.peakGravity = ReadFloat(cfg, kKeyPeakGravity, def.peakGravity);
+    s.peakHoldTime = ReadInt(cfg, kKeyPeakHoldTime, def.peakHoldTime);
     s.peakMarkerThickness = ReadInt(cfg, kKeyPeakMarkerThickness, def.peakMarkerThickness);
     s.peakMarkerHeightSegments = ReadInt(cfg, kKeyPeakMarkerHeightSegs, def.peakMarkerHeightSegments);
     s.peakSmoothMotion = ReadInt(cfg, kKeyPeakSmoothMotion, def.peakSmoothMotion ? 1 : 0) != 0;
@@ -274,7 +290,10 @@ void SaveSettings(IAIMPServiceConfig* cfg, const AuraBarsSettings& s)
     WriteInt(cfg, kKeyGridLineStyle, (int)s.gridLineStyle);
     WriteInt(cfg, kKeyPeakMarkers, s.peakMarkers ? 1 : 0);
     WriteInt(cfg, kKeyPeakMarkerColor, (int)s.peakMarkerColor);
-    WriteFloat(cfg, kKeyPeakFallSpeed, s.peakFallSpeed);
+    WriteInt(cfg, kKeyPeakFallMode, (int)s.peakFallMode);
+    WriteFloat(cfg, kKeyPeakFallSpeedPxPerSec, s.peakFallSpeedPxPerSec);
+    WriteFloat(cfg, kKeyPeakGravity, s.peakGravity);
+    WriteInt(cfg, kKeyPeakHoldTime, s.peakHoldTime);
     WriteInt(cfg, kKeyPeakMarkerThickness, s.peakMarkerThickness);
     WriteInt(cfg, kKeyPeakMarkerHeightSegs, s.peakMarkerHeightSegments);
     WriteInt(cfg, kKeyPeakSmoothMotion, s.peakSmoothMotion ? 1 : 0);

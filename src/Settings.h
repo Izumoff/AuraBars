@@ -14,6 +14,9 @@ enum class ChannelMode { Mono = 0, Stereo = 1 };
 // included for experimentation, not a recommended default). Code Contract
 // §2/§3.
 enum class BinAggregation { Average = 0, Peak = 1, Sum = 2 };
+// Combo item order (BuildPeaksTab) matches this enum order: Constant,
+// Gravity. Code Contract §7 step 3.
+enum class PeakFallMode { Constant = 0, Gravity = 1 };
 
 // These member initializers mirror the "Pandemic" built-in preset payload
 // (src/Presets.cpp) value-for-value, since Pandemic is the factory default
@@ -57,7 +60,16 @@ struct AuraBarsSettings
     GridLineStyle gridLineStyle = GridLineStyle::Dashed;
     bool peakMarkers = true;
     COLORREF peakMarkerColor = RGB(0xFE, 0x7A, 0x2C);
-    double peakFallSpeed = 1.5;                        // px/frame, 0.1-10.0
+    // Peak marker gravity (Code Contract §7 step 3). peakFallSpeedPxPerSec
+    // replaces the old peakFallSpeed (px/frame, 0.1-10.0) under a new config
+    // key deliberately - the unit changed (px/frame -> px/s), and reading
+    // an old stored 1.5 as px/s would be a crawl, not a fall. Renaming the
+    // key means the old value is simply never found (unknown-key rule),
+    // not converted - no migration code.
+    PeakFallMode peakFallMode = PeakFallMode::Gravity;
+    double peakFallSpeedPxPerSec = 48.0;               // px/s, 3-320, Constant mode only - old 1.5px/frame * 32fps, so Constant behaves as before
+    double peakGravity = 60.0;                         // px/s^2, 10-500, Gravity mode only
+    int peakHoldTime = 250;                            // ms, 0-1000, applies in both fall modes
     int peakMarkerThickness = 1;                       // px, 1-10, Smooth only
     int peakMarkerHeightSegments = 1;                  // segments, 1-3, LED only, ignored when peakSmoothMotion is on
     bool peakSmoothMotion = true;                      // LED only: continuous float peak position (like Smooth style) instead of segment-snapped

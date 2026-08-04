@@ -248,7 +248,12 @@ private:
     // Peaks tab
     IAIMPUICheckBox* m_PeakMarkersCheck = nullptr;
     IAIMPUIButton* m_PeakColorBtn = nullptr;
+    IAIMPUIComboBox* m_PeakFallModeCombo = nullptr;
+    IAIMPUILabel* m_PeakFallSpeedLabel = nullptr;
     IAIMPUIEdit* m_PeakFallSpeedEdit = nullptr;
+    IAIMPUILabel* m_PeakGravityLabel = nullptr;
+    IAIMPUIEdit* m_PeakGravityEdit = nullptr;
+    IAIMPUIEdit* m_PeakHoldTimeEdit = nullptr;
     IAIMPUILabel* m_PeakThicknessLabel = nullptr;
     IAIMPUIEdit* m_PeakThicknessEdit = nullptr;
     IAIMPUILabel* m_PeakHeightSegLabel = nullptr;

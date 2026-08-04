@@ -161,6 +161,7 @@ namespace
             case BinAggregation::Peak:    default: return L"Peak";
         }
     }
+    const wchar_t* NameOf(PeakFallMode m) { return m == PeakFallMode::Constant ? L"Constant" : L"Gravity"; }
     const wchar_t* NameOf(bool b) { return b ? L"true" : L"false"; }
 
     std::wstring ColorHex(COLORREF c)
@@ -421,10 +422,16 @@ namespace
         if (IEquals(v, L"Sum")) { field = BinAggregation::Sum; return true; }
         return false;
     }
+    bool ApplyPeakFallMode(const std::wstring& v, PeakFallMode& field)
+    {
+        if (IEquals(v, L"Constant")) { field = PeakFallMode::Constant; return true; }
+        if (IEquals(v, L"Gravity")) { field = PeakFallMode::Gravity; return true; }
+        return false;
+    }
 
     using KeyHandler = std::function<bool(const std::wstring&, AuraBarsSettings&)>;
 
-    // Key list mirrors SerializeSettings()'s output one-for-one (50 keys) -
+    // Key list mirrors SerializeSettings()'s output one-for-one (53 keys) -
     // kept immediately below it in this file on purpose, per the contract's
     // "the two must live next to each other" requirement. Key names are
     // matched case-insensitively by the caller (ParseSettings lowercases
@@ -460,7 +467,14 @@ namespace
 
         h[L"peakmarkers"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyBool(v, s.peakMarkers); };
         h[L"peakmarkercolor"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyColor(v, s.peakMarkerColor); };
-        h[L"peakfallspeed"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyFloat(v, s.peakFallSpeed); };
+        // "peakfallspeed" (old key, px/frame) is deliberately NOT registered
+        // here - Code Contract §7 step 3 renamed it to PeakFallSpeedPxPerSec
+        // (px/s) specifically so an old stored/pasted value is discarded by
+        // the unknown-key rule below rather than misread under the new unit.
+        h[L"peakfallmode"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyPeakFallMode(v, s.peakFallMode); };
+        h[L"peakfallspeedpxpersec"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyFloat(v, s.peakFallSpeedPxPerSec); };
+        h[L"peakgravity"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyFloat(v, s.peakGravity); };
+        h[L"peakholdtime"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyInt(v, s.peakHoldTime); };
         h[L"peakmarkerthickness"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyInt(v, s.peakMarkerThickness); };
         h[L"peakmarkerheightsegments"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyInt(v, s.peakMarkerHeightSegments); };
         h[L"peaksmoothmotion"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyBool(v, s.peakSmoothMotion); };
@@ -744,7 +758,8 @@ void WINAPI COptionsFrame::OnChanged(IUnknown* Sender)
     if (SenderIs(Sender, m_BarStyleCombo) || SenderIs(Sender, m_BarColorModeCombo) ||
         SenderIs(Sender, m_AmpScaleCombo) || SenderIs(Sender, m_ChannelModeCombo) ||
         SenderIs(Sender, m_AutoGainCheck) || SenderIs(Sender, m_BarSmoothingCheck) ||
-        SenderIs(Sender, m_BackgroundBarColorModeCombo) || SenderIs(Sender, m_PeakSmoothMotionCheck))
+        SenderIs(Sender, m_BackgroundBarColorModeCombo) || SenderIs(Sender, m_PeakSmoothMotionCheck) ||
+        SenderIs(Sender, m_PeakFallModeCombo))
     {
         UpdateEnabledStates();
         NotifyModified();
@@ -1101,22 +1116,33 @@ void COptionsFrame::BuildBarsTab(IAIMPUIWinControl* tab)
 void COptionsFrame::BuildPeaksTab(IAIMPUIWinControl* tab)
 {
     const int groupW = kFieldX + kFieldW + 10;
-    const int rows = 5;
+    const int rows = 8;
     IAIMPUIGroupBox* group = CreateGroupBox(tab, 10, 8, groupW, kGroupContentTop + rows * kRowH + kGroupContentBottom, L"Peak Markers");
 
     m_PeakMarkersCheck = CreateCheckBox(group, 10, kGroupContentTop, 140, 12, L"Peak markers");
     m_PeakColorBtn = CreateColorButton(group, kFieldX, kGroupContentTop, kFieldW, kButtonH);
 
-    LabelRow(group, kGroupContentTop + kRowH, 10, L"Peak fall speed (px/frame, 0.1-10.0):");
-    m_PeakFallSpeedEdit = CreateEdit(group, kFieldX, kGroupContentTop + kRowH, kFieldW, kFieldH);
+    // Order matches the clipboard payload's tab order (Code Contract §7
+    // step 3): mode, then the two mode-specific settings, then hold time.
+    LabelRow(group, kGroupContentTop + kRowH, 10, L"Peak fall mode:");
+    m_PeakFallModeCombo = CreateCombo(group, kFieldX, kGroupContentTop + kRowH, kFieldW, 60, L"Constant", L"Gravity");
 
-    m_PeakThicknessLabel = CreateLabel(group, 10, kGroupContentTop + 2 * kRowH, kFieldX - 20, 12, L"Peak thickness (Smooth, 1-10):");
-    m_PeakThicknessEdit = CreateEdit(group, kFieldX, kGroupContentTop + 2 * kRowH, kFieldW, kFieldH);
+    m_PeakFallSpeedLabel = CreateLabel(group, 10, kGroupContentTop + 2 * kRowH, kFieldX - 20, 12, L"Peak fall speed (px/s, 3-320):");
+    m_PeakFallSpeedEdit = CreateEdit(group, kFieldX, kGroupContentTop + 2 * kRowH, kFieldW, kFieldH);
 
-    m_PeakHeightSegLabel = CreateLabel(group, 10, kGroupContentTop + 3 * kRowH, kFieldX - 20, 12, L"Peak height, segments (LED, 1-3):");
-    m_PeakHeightSegEdit = CreateEdit(group, kFieldX, kGroupContentTop + 3 * kRowH, kFieldW, kFieldH);
+    m_PeakGravityLabel = CreateLabel(group, 10, kGroupContentTop + 3 * kRowH, kFieldX - 20, 12, L"Peak gravity (px/s^2, 10-500):");
+    m_PeakGravityEdit = CreateEdit(group, kFieldX, kGroupContentTop + 3 * kRowH, kFieldW, kFieldH);
 
-    m_PeakSmoothMotionCheck = CreateCheckBox(group, 10, kGroupContentTop + 4 * kRowH, groupW - 20, 12, L"Peak marker smooth motion (LED style)");
+    LabelRow(group, kGroupContentTop + 4 * kRowH, 10, L"Peak hold time (ms, 0-1000):");
+    m_PeakHoldTimeEdit = CreateEdit(group, kFieldX, kGroupContentTop + 4 * kRowH, kFieldW, kFieldH);
+
+    m_PeakThicknessLabel = CreateLabel(group, 10, kGroupContentTop + 5 * kRowH, kFieldX - 20, 12, L"Peak thickness (Smooth, 1-10):");
+    m_PeakThicknessEdit = CreateEdit(group, kFieldX, kGroupContentTop + 5 * kRowH, kFieldW, kFieldH);
+
+    m_PeakHeightSegLabel = CreateLabel(group, 10, kGroupContentTop + 6 * kRowH, kFieldX - 20, 12, L"Peak height, segments (LED, 1-3):");
+    m_PeakHeightSegEdit = CreateEdit(group, kFieldX, kGroupContentTop + 6 * kRowH, kFieldW, kFieldH);
+
+    m_PeakSmoothMotionCheck = CreateCheckBox(group, 10, kGroupContentTop + 7 * kRowH, groupW - 20, 12, L"Peak marker smooth motion (LED style)");
 }
 
 void COptionsFrame::BuildBackgroundTab(IAIMPUIWinControl* tab)
@@ -1232,6 +1258,10 @@ void COptionsFrame::EnableAllControls()
     SetEnabled(m_BackgroundBarGradBottomBtn, true);
     SetEnabled(m_BackgroundBarGradBottomLabel, true);
 
+    SetEnabled(m_PeakFallSpeedEdit, true);
+    SetEnabled(m_PeakFallSpeedLabel, true);
+    SetEnabled(m_PeakGravityEdit, true);
+    SetEnabled(m_PeakGravityLabel, true);
     SetEnabled(m_PeakThicknessEdit, true);
     SetEnabled(m_PeakThicknessLabel, true);
     SetEnabled(m_PeakHeightSegEdit, true);
@@ -1302,7 +1332,10 @@ void COptionsFrame::PopulateControls()
     SetCheckState(m_BorderEnabledCheck, m_Working.borderEnabled);
     SetCheckState(m_SeparatorEnabledCheck, m_Working.separatorEnabled);
 
-    SetEditFloat(m_PeakFallSpeedEdit, m_Working.peakFallSpeed);
+    SetComboIndex(m_PeakFallModeCombo, (int)m_Working.peakFallMode);
+    SetEditFloat(m_PeakFallSpeedEdit, m_Working.peakFallSpeedPxPerSec);
+    SetEditFloat(m_PeakGravityEdit, m_Working.peakGravity);
+    SetEditInt(m_PeakHoldTimeEdit, m_Working.peakHoldTime);
     SetEditInt(m_PeakThicknessEdit, m_Working.peakMarkerThickness);
     SetEditInt(m_PeakHeightSegEdit, m_Working.peakMarkerHeightSegments);
     SetEditInt(m_BarSpacingEdit, m_Working.barSpacing);
@@ -1342,6 +1375,7 @@ void COptionsFrame::ReadControlsIntoWorking()
     m_Working.backgroundStyle = (BackgroundStyle)GetValidatedComboIndex(m_BackStyleCombo, (int)m_Working.backgroundStyle, 1, L"BackgroundStyle");
     m_Working.gridLineStyle = (GridLineStyle)GetValidatedComboIndex(m_GridStyleCombo, (int)m_Working.gridLineStyle, 1, L"GridLineStyle");
     m_Working.channelMode = (ChannelMode)GetValidatedComboIndex(m_ChannelModeCombo, (int)m_Working.channelMode, 1, L"ChannelMode");
+    m_Working.peakFallMode = (PeakFallMode)GetValidatedComboIndex(m_PeakFallModeCombo, (int)m_Working.peakFallMode, 1, L"PeakFallMode");
 
     m_Working.gridLines = GetCheckState(m_GridLinesCheck);
     m_Working.backgroundBarsEnabled = GetCheckState(m_BackgroundBarsCheck);
@@ -1351,7 +1385,9 @@ void COptionsFrame::ReadControlsIntoWorking()
     m_Working.borderEnabled = GetCheckState(m_BorderEnabledCheck);
     m_Working.separatorEnabled = GetCheckState(m_SeparatorEnabledCheck);
 
-    m_Working.peakFallSpeed = GetEditFloat(m_PeakFallSpeedEdit, m_Working.peakFallSpeed);
+    m_Working.peakFallSpeedPxPerSec = GetEditFloat(m_PeakFallSpeedEdit, m_Working.peakFallSpeedPxPerSec);
+    m_Working.peakGravity = GetEditFloat(m_PeakGravityEdit, m_Working.peakGravity);
+    m_Working.peakHoldTime = GetEditInt(m_PeakHoldTimeEdit, m_Working.peakHoldTime);
     m_Working.peakMarkerThickness = GetEditInt(m_PeakThicknessEdit, m_Working.peakMarkerThickness);
     m_Working.peakMarkerHeightSegments = GetEditInt(m_PeakHeightSegEdit, m_Working.peakMarkerHeightSegments);
     m_Working.barSpacing = GetEditInt(m_BarSpacingEdit, m_Working.barSpacing);
@@ -1403,6 +1439,15 @@ void COptionsFrame::UpdateEnabledStates()
     SetEnabled(m_BackgroundBarGradTopLabel, isBackgroundGradient);
     SetEnabled(m_BackgroundBarGradBottomBtn, isBackgroundGradient);
     SetEnabled(m_BackgroundBarGradBottomLabel, isBackgroundGradient);
+
+    // Peak marker gravity (Code Contract §7 step 3): Constant mode uses
+    // Peak fall speed only, Gravity mode uses Peak gravity only. Peak hold
+    // time applies in both modes, so it's never toggled here (see BuildPeaksTab).
+    bool isGravityFall = GetComboIndex(m_PeakFallModeCombo, 0) == 1;
+    SetEnabled(m_PeakFallSpeedEdit, !isGravityFall);
+    SetEnabled(m_PeakFallSpeedLabel, !isGravityFall);
+    SetEnabled(m_PeakGravityEdit, isGravityFall);
+    SetEnabled(m_PeakGravityLabel, isGravityFall);
 
     bool peakSmoothMotion = GetCheckState(m_PeakSmoothMotionCheck);
     bool useThickness = !isLed || peakSmoothMotion;
@@ -1676,7 +1721,10 @@ std::wstring SerializeSettings(const AuraBarsSettings& s)
     out += L"[Peaks]\r\n";
     out += L"PeakMarkers="; out += NameOf(s.peakMarkers); out += L"\r\n";
     out += L"PeakMarkerColor="; out += ColorHex(s.peakMarkerColor); out += L"\r\n";
-    out += L"PeakFallSpeed="; out += Float1(s.peakFallSpeed); out += L"\r\n";
+    out += L"PeakFallMode="; out += NameOf(s.peakFallMode); out += L"\r\n";
+    out += L"PeakFallSpeedPxPerSec="; out += Float1(s.peakFallSpeedPxPerSec); out += L"\r\n";
+    out += L"PeakGravity="; out += Float1(s.peakGravity); out += L"\r\n";
+    out += L"PeakHoldTime="; out += std::to_wstring(s.peakHoldTime); out += L"\r\n";
     out += L"PeakMarkerThickness="; out += std::to_wstring(s.peakMarkerThickness); out += L"\r\n";
     out += L"PeakMarkerHeightSegments="; out += std::to_wstring(s.peakMarkerHeightSegments); out += L"\r\n";
     out += L"PeakSmoothMotion="; out += NameOf(s.peakSmoothMotion); out += L"\r\n";

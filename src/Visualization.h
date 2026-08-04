@@ -64,18 +64,21 @@ private:
     void DrawBackground(HDC dc, const RECT& area);
     COLORREF BackgroundColorAtY(int y, const RECT& area) const;
     // spectrumChannel: -1 averages Spectrum[0]/[1] (Mono); 0 or 1 reads a
-    // single real channel (Stereo). peakState/autoGainState/smoothedState
-    // are the per-bar running state to read and update - Mono and
-    // Stereo-left share m_PeakYLeft/m_AutoGainCeilingDbLeft/m_SmoothedLeft,
+    // single real channel (Stereo). peakState/velocityState/holdState/
+    // autoGainState/smoothedState are the per-bar running state to read and
+    // update - Mono and Stereo-left share m_PeakYLeft/m_PeakVelocityLeft/
+    // m_PeakHoldRemainingLeft/m_AutoGainCeilingDbLeft/m_SmoothedLeft,
     // Stereo-right uses its own set, so switching channel modes or having
-    // differently-loud L/R content never cross-contaminates decay state
-    // between them.
+    // differently-loud L/R content never cross-contaminates decay or
+    // peak-marker-motion state between them.
     // dt: wall-clock seconds since the previous Draw() call (Code Contract
     // §7 step 2 / §1), measured once per Draw and passed down - never
     // re-measured per bar or per channel. Feeds the smoothing-coefficient
-    // frame-rate conversion inside; see ConvertSmoothingCoefficient.
+    // frame-rate conversion (ConvertSmoothingCoefficient) and the peak
+    // marker motion model (Code Contract §7 step 3) inside.
     void ComputeBarLayout(const RECT& area, const TAIMPVisualData* data, int spectrumChannel,
-                           std::vector<float>& peakState, std::vector<float>& autoGainState,
+                           std::vector<float>& peakState, std::vector<float>& velocityState,
+                           std::vector<float>& holdState, std::vector<float>& autoGainState,
                            std::vector<float>& smoothedState,
                            bool emitDebugLog, double dt, std::vector<BarLayout>& out);
     // bounds: the region grid lines are actually drawn/confined within
@@ -115,16 +118,28 @@ private:
 
     // Mono uses the "Left" pair as its one and only channel's state;
     // Stereo uses both pairs independently for its two channel halves.
-    std::vector<float> m_PeakYLeft;             // absolute pixel Y (device coords) of each bar's peak marker
+    std::vector<float> m_PeakYLeft;             // absolute pixel Y (device coords) of each bar's peak marker - "position" in Code Contract §7 step 3's motion model
     std::vector<float> m_AutoGainCeilingDbLeft; // per-bar running adaptive ceiling (dB), fast attack / slow release
     // Unlike m_PeakY*, this holds an audio magnitude, not a device pixel
     // coordinate, so it stays valid across Resize()/Initialize() and is
     // deliberately never cleared there - clearing it would reintroduce an
     // attack-ramp transient on every window resize for no reason.
     std::vector<float> m_SmoothedLeft;
+    // Peak marker gravity (Code Contract §7 step 3): "velocity" and
+    // "remaining hold" from the motion model, alongside m_PeakY* above
+    // ("position"). Cleared on Resize() together with m_PeakY* - unlike
+    // m_Smoothed* (an audio magnitude, resize-independent), these are
+    // device-pixel-space physics state; a stale absolute position from a
+    // very different panel size paired with a *fresh* velocity/hold would
+    // be an inconsistent hybrid, so all three reset together rather than
+    // independently.
+    std::vector<float> m_PeakVelocityLeft;      // px/s, always >= 0 (fall-speed magnitude, not a signed device-Y rate)
+    std::vector<float> m_PeakHoldRemainingLeft; // ms remaining in the post-retrigger hold before a marker starts falling
     std::vector<float> m_PeakYRight;
     std::vector<float> m_AutoGainCeilingDbRight;
     std::vector<float> m_SmoothedRight;
+    std::vector<float> m_PeakVelocityRight;
+    std::vector<float> m_PeakHoldRemainingRight;
     ULONGLONG m_LastDebugLogTick = 0;       // GetTickCount64() at last debug-log write, for the 1/sec cadence
     // Effective bar count (post horizontal-fit-invariant) from the most
     // recently completed ComputeBarLayout call this session - i.e. the
