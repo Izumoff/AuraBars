@@ -1,5 +1,6 @@
 #include "Visualization.h"
 #include "BarGeometry.h"
+#include "apiPlayer.h" // TEMP DIAGNOSTIC (LogCadenceSample) - only user of IAIMPServicePlayer in this file
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -232,6 +233,15 @@ void CVisualization::ReleaseBackBuffer()
 
 void WINAPI CVisualization::Draw(HCANVAS Canvas, PAIMPVisualData Data)
 {
+    // TEMP DIAGNOSTIC - see LogCadenceSample(). Placed before every early
+    // return so it times every actual call AIMP makes, not just the ones
+    // that go on to paint. Remove this call (and LogCadenceSample) once the
+    // cadence question it exists to answer is settled.
+    if (g_Settings.debugLogging)
+        LogCadenceSample();
+    else
+        m_CadenceActive = false; // so the next enable re-inits cleanly instead of measuring across the gap
+
     if (!Data || m_Width <= 0 || m_Height <= 0)
         return;
 
@@ -578,16 +588,143 @@ void CVisualization::UpdateAutoGainCeiling(float& ceilingDb, float currentDb)
 
 void CVisualization::LogDebugSample(int firstIdx, float firstRaw, float firstDb,
                                      int midIdx, float midRaw, float midDb,
-                                     int lastIdx, float lastRaw, float lastDb) const
+                                     int lastIdx, float lastRaw, float lastDb,
+                                     int effectiveBarCount) const
 {
+    // effectiveBarCount logged explicitly (not just implied by lastIdx+1) so
+    // a horizontal-fit-invariant clamp - e.g. a narrow window quietly
+    // reducing NumberOfBars=20 down to 7 - is visible on the line itself
+    // instead of requiring the reader to notice bar7 where bar20 was expected.
     wchar_t line[320];
     swprintf_s(line,
-        L"floor=%.1fdB ceiling=%.1fdB | bar%d raw=%.5f db=%.2f | bar%d raw=%.5f db=%.2f | bar%d raw=%.5f db=%.2f",
-        g_Settings.dbFloor, g_Settings.dbCeiling,
+        L"bars=%d floor=%.1fdB ceiling=%.1fdB | bar%d raw=%.5f db=%.2f | bar%d raw=%.5f db=%.2f | bar%d raw=%.5f db=%.2f",
+        effectiveBarCount, g_Settings.dbFloor, g_Settings.dbCeiling,
         firstIdx + 1, firstRaw, firstDb,
         midIdx + 1, midRaw, midDb,
         lastIdx + 1, lastRaw, lastDb);
     AppendDebugLog(line);
+}
+
+// ============================================================================
+// TEMP DIAGNOSTIC - frame-cadence measurement. Exists only to settle a units
+// question (is the Draw call rate stable, and does it vary with drawable
+// area?). Not part of the Code Contract - delete this method, its call site
+// in Draw(), the m_Cadence*/m_LastDrawQpc/m_QpcFrequency/m_LastPlaybackActive
+// members in Visualization.h, and the apiPlayer.h include once that question
+// is answered.
+//
+// Called once per Draw() when DebugLogging is on (see Draw()'s call site,
+// which also resets m_CadenceActive when logging is off so a later re-enable
+// starts a fresh window instead of measuring across the disabled gap).
+// Writes distinctly-prefixed lines to the same %TEMP%\AuraBars_debug.log
+// as LogDebugSample, via AppendDebugLog:
+//   CADENCE-INIT       once, the first Draw() after logging (re)starts - QPC frequency
+//   CADENCE-NOPLAYBACK edge-triggered - Draw fired while the player isn't in the Playing state, or resumed
+//   CADENCE            once/sec - frame count and interval stats for the second just completed
+// ============================================================================
+void CVisualization::LogCadenceSample()
+{
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+
+    int playerState = AIMP_PLAYER_STATE_STOPPED;
+    IAIMPServicePlayer* player = nullptr;
+    if (g_Core && SUCCEEDED(g_Core->QueryInterface(IID_IAIMPServicePlayer, (void**)&player)) && player)
+    {
+        playerState = player->GetState();
+        player->Release();
+    }
+    const bool playbackActive = (playerState == AIMP_PLAYER_STATE_PLAYING);
+
+    if (!m_CadenceActive)
+    {
+        // Just (re)started: capture the frequency once and open a fresh
+        // window, rather than computing an interval against a stale
+        // m_LastDrawQpc left over from before logging was off.
+        QueryPerformanceFrequency(&m_QpcFrequency);
+        wchar_t initLine[128];
+        swprintf_s(initLine, L"CADENCE-INIT qpc_freq=%lld", (long long)m_QpcFrequency.QuadPart);
+        AppendDebugLog(initLine);
+
+        m_CadenceActive = true;
+        m_LastDrawQpc = now;
+        // First window closes exactly one QPC-frequency's worth of ticks
+        // (== 1000ms) from now; every later window advances this same target
+        // by that fixed tick count rather than resetting to "now" at emit
+        // time, so the cadence stays pinned to real wall-clock seconds
+        // instead of drifting later with each window's processing/rounding
+        // slack.
+        m_CadenceNextEmitQpc.QuadPart = now.QuadPart + m_QpcFrequency.QuadPart;
+        m_CadenceFrameCount = 0;
+        m_CadenceSumMs = 0.0;
+        m_CadenceSumSqMs = 0.0;
+        m_LastPlaybackActive = playbackActive;
+
+        if (!playbackActive)
+            AppendDebugLog(L"CADENCE-NOPLAYBACK Draw firing with no active playback (state at logging start)");
+        return;
+    }
+
+    if (playbackActive != m_LastPlaybackActive)
+    {
+        m_LastPlaybackActive = playbackActive;
+        AppendDebugLog(playbackActive
+            ? L"CADENCE-NOPLAYBACK playback resumed, Draw continues"
+            : L"CADENCE-NOPLAYBACK Draw firing with no active playback");
+    }
+
+    if (m_QpcFrequency.QuadPart <= 0)
+        return; // shouldn't happen on any real Windows box, but guards the divide below
+
+    const double intervalMs = (double)(now.QuadPart - m_LastDrawQpc.QuadPart) * 1000.0 / (double)m_QpcFrequency.QuadPart;
+    m_LastDrawQpc = now;
+
+    if (m_CadenceFrameCount == 0)
+        m_CadenceMinMs = m_CadenceMaxMs = intervalMs;
+    else
+    {
+        m_CadenceMinMs = std::min(m_CadenceMinMs, intervalMs);
+        m_CadenceMaxMs = std::max(m_CadenceMaxMs, intervalMs);
+    }
+    m_CadenceSumMs += intervalMs;
+    m_CadenceSumSqMs += intervalMs * intervalMs;
+    m_CadenceFrameCount++;
+
+    // Wall-clock trigger, not a frame count: fires once `now` reaches the
+    // target set when the previous window closed (or when logging started).
+    if (now.QuadPart >= m_CadenceNextEmitQpc.QuadPart)
+    {
+        if (m_CadenceFrameCount > 0)
+        {
+            const double mean = m_CadenceSumMs / m_CadenceFrameCount;
+            // Streaming variance (E[x^2] - E[x]^2) can go slightly negative
+            // from float rounding when interval samples barely vary; clamp
+            // before sqrt.
+            const double variance = std::max(0.0, m_CadenceSumSqMs / m_CadenceFrameCount - mean * mean);
+            const double stddev = std::sqrt(variance);
+
+            const wchar_t* modeStr = (g_Settings.channelMode == ChannelMode::Stereo) ? L"Stereo" : L"Mono";
+            wchar_t line[256];
+            swprintf_s(line,
+                L"CADENCE frames=%d mean_ms=%.2f min_ms=%.2f max_ms=%.2f stddev_ms=%.2f w=%d h=%d mode=%s bars=%d",
+                m_CadenceFrameCount, mean, m_CadenceMinMs, m_CadenceMaxMs, stddev,
+                m_Width, m_Height, modeStr, m_LastEffectiveBarCount);
+            AppendDebugLog(line);
+        }
+
+        m_CadenceFrameCount = 0;
+        m_CadenceSumMs = 0.0;
+        m_CadenceSumSqMs = 0.0;
+
+        // Advance by exactly one second of ticks, possibly more than once if
+        // Draw() stalled past a whole window - keeps the target anchored to
+        // wall-clock second boundaries instead of re-basing off "now" and
+        // losing that alignment.
+        do
+        {
+            m_CadenceNextEmitQpc.QuadPart += m_QpcFrequency.QuadPart;
+        } while (m_CadenceNextEmitQpc.QuadPart <= now.QuadPart);
+    }
 }
 
 void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* data, int spectrumChannel,
@@ -605,6 +742,11 @@ void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* d
     const int drawableWidth = (int)(area.right - area.left);
     const BarGeometry geometry = ComputeBarGeometry(drawableWidth, g_Settings.barCount, g_Settings.barSpacing);
     const int n = geometry.effectiveBarCount;
+
+    // TEMP DIAGNOSTIC - feeds LogCadenceSample's "bars=" field with the
+    // count actually rendered (post fit-invariant), not g_Settings.barCount.
+    // Remove when the m_LastEffectiveBarCount member is removed.
+    m_LastEffectiveBarCount = n;
 
     if ((int)peakState.size() != n)
         peakState.assign(n, (float)area.bottom);
@@ -650,8 +792,16 @@ void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* d
 
     // "Bar 20 (or the middle bar)" per the debug-logging spec: bar 20 when
     // there are enough bars, otherwise the middle one.
+    //
+    // BUG (fixed): this used to read `n >= 20`, so at exactly n==20 the
+    // fixed "bar 20" reference (index 19) collided with debugIdxLast
+    // (n-1==19) - the log showed bar1/bar20/bar20 with the mid sample
+    // silently duplicating the last one. `n > 20` keeps the fixed
+    // reference strictly below the last bar whenever it's used (last ==
+    // n-1 > 19 there), and n==20 now falls through to the n/2 branch
+    // (index 10, bar11) same as any other sub-21 count.
     const int debugIdxFirst = 0;
-    const int debugIdxMid = (n >= 20) ? 19 : n / 2;
+    const int debugIdxMid = (n > 20) ? 19 : n / 2;
     const int debugIdxLast = n - 1;
     float debugRawFirst = 0.0f, debugDbFirst = 0.0f;
     float debugRawMid = 0.0f, debugDbMid = 0.0f;
@@ -769,7 +919,8 @@ void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* d
             m_LastDebugLogTick = now;
             LogDebugSample(debugIdxFirst, debugRawFirst, debugDbFirst,
                             debugIdxMid, debugRawMid, debugDbMid,
-                            debugIdxLast, debugRawLast, debugDbLast);
+                            debugIdxLast, debugRawLast, debugDbLast,
+                            n);
         }
     }
 }

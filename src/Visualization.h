@@ -76,7 +76,13 @@ private:
     void UpdateAutoGainCeiling(float& ceilingDb, float currentDb);
     void LogDebugSample(int firstIdx, float firstRaw, float firstDb,
                          int midIdx, float midRaw, float midDb,
-                         int lastIdx, float lastRaw, float lastDb) const;
+                         int lastIdx, float lastRaw, float lastDb,
+                         int effectiveBarCount) const;
+
+    // TEMP DIAGNOSTIC - frame-cadence measurement, see Draw()'s call site.
+    // Not part of the Code Contract; remove this method and its members
+    // once the units question it exists to answer is settled.
+    void LogCadenceSample();
 
     std::atomic<long> m_RefCount{1};
 
@@ -100,4 +106,31 @@ private:
     std::vector<float> m_AutoGainCeilingDbRight;
     std::vector<float> m_SmoothedRight;
     ULONGLONG m_LastDebugLogTick = 0;       // GetTickCount64() at last debug-log write, for the 1/sec cadence
+    // Effective bar count (post horizontal-fit-invariant) from the most
+    // recently completed ComputeBarLayout call this session - i.e. the
+    // real count actually rendered, not g_Settings.barCount. In Stereo this
+    // is whichever region (left/right) computed last each frame; the two
+    // are the same width by construction except for rare 1px rounding
+    // differences, immaterial for a once/sec diagnostic. Read by
+    // LogCadenceSample, which runs before this frame's ComputeBarLayout, so
+    // it reflects the previous frame's value - up to one frame stale.
+    int m_LastEffectiveBarCount = 0;
+
+    // TEMP DIAGNOSTIC - frame-cadence measurement (see LogCadenceSample).
+    // Remove this whole block once the units decision it's here to settle
+    // is made; none of it belongs in the Code Contract.
+    LARGE_INTEGER m_QpcFrequency{};         // QueryPerformanceFrequency(), captured once when cadence logging (re)starts
+    bool m_CadenceActive = false;           // mirrors g_Settings.debugLogging as observed by the cadence path; false->true is "just (re)started"
+    LARGE_INTEGER m_LastDrawQpc{};          // QPC timestamp of the previous Draw() call
+    // Wall-clock emission target: advanced by exactly one QPC-frequency's
+    // worth of ticks (== 1000ms) each time a line is emitted, rather than
+    // reset to "now" - so the once/sec cadence tracks real elapsed time
+    // without drifting later every window from rounding/processing slack.
+    LARGE_INTEGER m_CadenceNextEmitQpc{};
+    int m_CadenceFrameCount = 0;
+    double m_CadenceSumMs = 0.0;
+    double m_CadenceSumSqMs = 0.0;
+    double m_CadenceMinMs = 0.0;
+    double m_CadenceMaxMs = 0.0;
+    bool m_LastPlaybackActive = true;       // last observed player state, for edge-triggered "Draw fired while not playing" logging
 };
