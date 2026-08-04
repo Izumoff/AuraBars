@@ -6,6 +6,10 @@ AuraBarsSettings g_Settings;
 namespace
 {
     const wchar_t* kKeyBarCount              = L"AuraBars\\BarCount";
+    const wchar_t* kKeyMinFrequency          = L"AuraBars\\MinFrequency";
+    const wchar_t* kKeyMaxFrequency          = L"AuraBars\\MaxFrequency";
+    const wchar_t* kKeyBinAggregation        = L"AuraBars\\BinAggregation";
+    const wchar_t* kKeySpectralTilt          = L"AuraBars\\SpectralTilt";
     const wchar_t* kKeyAmplitudeScaling      = L"AuraBars\\AmplitudeScaling";
     const wchar_t* kKeyDbFloor               = L"AuraBars\\DbFloor";
     const wchar_t* kKeyDbCeiling             = L"AuraBars\\DbCeiling";
@@ -92,6 +96,10 @@ namespace
 bool operator==(const AuraBarsSettings& a, const AuraBarsSettings& b)
 {
     return a.barCount == b.barCount &&
+        a.minFrequency == b.minFrequency &&
+        a.maxFrequency == b.maxFrequency &&
+        a.binAggregation == b.binAggregation &&
+        a.spectralTilt == b.spectralTilt &&
         a.amplitudeScaling == b.amplitudeScaling &&
         a.dbFloor == b.dbFloor &&
         a.dbCeiling == b.dbCeiling &&
@@ -142,6 +150,16 @@ bool operator==(const AuraBarsSettings& a, const AuraBarsSettings& b)
 void ClampSettings(AuraBarsSettings& s)
 {
     s.barCount = std::clamp(s.barCount, 8, 128);
+    s.minFrequency = std::clamp(s.minFrequency, 20, 200);
+    s.maxFrequency = std::clamp(s.maxFrequency, 4000, 20000);
+    // Min frequency must stay below Max frequency by at least one octave -
+    // pushes MaxFrequency ahead rather than rejecting the edit or prompting
+    // (Code Contract §2). The two fields' ranges are disjoint (200 vs 4000
+    // floor) so this branch is not reachable today, but is enforced here
+    // defensively per the contract in case the ranges are ever widened.
+    if (s.maxFrequency < s.minFrequency * 2)
+        s.maxFrequency = s.minFrequency * 2;
+    s.spectralTilt = std::clamp(s.spectralTilt, 0.0, 6.0);
     s.dbFloor = std::clamp(s.dbFloor, -100.0, -20.0);
     s.dbCeiling = std::clamp(s.dbCeiling, -20.0, 0.0);
     if (s.dbCeiling <= s.dbFloor)
@@ -172,6 +190,10 @@ void LoadSettings(IAIMPServiceConfig* cfg, AuraBarsSettings& s)
     AuraBarsSettings def; // defaults to fall back on
 
     s.barCount = ReadInt(cfg, kKeyBarCount, def.barCount);
+    s.minFrequency = ReadInt(cfg, kKeyMinFrequency, def.minFrequency);
+    s.maxFrequency = ReadInt(cfg, kKeyMaxFrequency, def.maxFrequency);
+    s.binAggregation = (BinAggregation)ReadInt(cfg, kKeyBinAggregation, (int)def.binAggregation);
+    s.spectralTilt = ReadFloat(cfg, kKeySpectralTilt, def.spectralTilt);
     s.amplitudeScaling = (AmplitudeScaling)ReadInt(cfg, kKeyAmplitudeScaling, (int)def.amplitudeScaling);
     s.dbFloor = ReadFloat(cfg, kKeyDbFloor, def.dbFloor);
     s.dbCeiling = ReadFloat(cfg, kKeyDbCeiling, def.dbCeiling);
@@ -227,6 +249,10 @@ void SaveSettings(IAIMPServiceConfig* cfg, const AuraBarsSettings& s)
         return;
 
     WriteInt(cfg, kKeyBarCount, s.barCount);
+    WriteInt(cfg, kKeyMinFrequency, s.minFrequency);
+    WriteInt(cfg, kKeyMaxFrequency, s.maxFrequency);
+    WriteInt(cfg, kKeyBinAggregation, (int)s.binAggregation);
+    WriteFloat(cfg, kKeySpectralTilt, s.spectralTilt);
     WriteInt(cfg, kKeyAmplitudeScaling, (int)s.amplitudeScaling);
     WriteFloat(cfg, kKeyDbFloor, s.dbFloor);
     WriteFloat(cfg, kKeyDbCeiling, s.dbCeiling);

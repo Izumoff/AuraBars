@@ -8,6 +8,12 @@ enum class BackgroundStyle { Flat = 0, Gradient = 1 };
 enum class AmplitudeScaling { Linear = 0, Logarithmic = 1 };
 enum class GridLineStyle { Dashed = 0, Solid = 1 };
 enum class ChannelMode { Mono = 0, Stereo = 1 };
+// Combo item order (BuildScalingTab) matches this enum order: Average,
+// Peak, Sum. Peak = max of a bar's bin range, Average = arithmetic mean,
+// Sum = total (scales with bin count, so upper bars read much hotter -
+// included for experimentation, not a recommended default). Code Contract
+// §2/§3.
+enum class BinAggregation { Average = 0, Peak = 1, Sum = 2 };
 
 // These member initializers mirror the "Pandemic" built-in preset payload
 // (src/Presets.cpp) value-for-value, since Pandemic is the factory default
@@ -20,6 +26,16 @@ enum class ChannelMode { Mono = 0, Stereo = 1 };
 struct AuraBarsSettings
 {
     int barCount = 18;                                  // 8-128
+    // Frequency mapping (Code Contract §1/§2/§3): bar edges are placed at
+    // frequencies (geometric between MinFrequency/MaxFrequency), then
+    // converted to bin indices via the vendored AIMP bin->frequency table
+    // (FrequencyMap.h) - never spaced by bin index directly. Runs first in
+    // the per-bar pipeline: group -> aggregate -> tilt -> smooth ->
+    // amplitude scale -> peak markers.
+    int minFrequency = 35;                              // Hz, 20-200
+    int maxFrequency = 16000;                           // Hz, 4000-20000; must stay at least one octave above minFrequency
+    BinAggregation binAggregation = BinAggregation::Peak;
+    double spectralTilt = 3.0;                          // dB/octave, 0.0-6.0, one decimal; linear multiplier applied after aggregation, before smoothing; 0.0 disables it
     AmplitudeScaling amplitudeScaling = AmplitudeScaling::Logarithmic;
     double dbFloor = -40.0;                            // dB, -100.0 to -20.0, Logarithmic only
     double dbCeiling = 0.0;                            // dB, -20.0 to 0.0, Logarithmic only

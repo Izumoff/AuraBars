@@ -42,6 +42,22 @@ private:
         float peakY;    // this frame's updated peak-marker Y, device px
     };
 
+    // Debug-logging reference bar (Code Contract §3): one of the three
+    // frequency-anchored samples (~60Hz/1kHz/8kHz) LogDebugSample prints.
+    // freqHz is the bar's *actual* sampled centre frequency - via
+    // BinToFrequency on its real (post-quantization) bin range, not the
+    // idealized continuous bar-edge midpoint - so what's printed matches
+    // what was genuinely read from Spectrum[]. index is 0-based; pre/post
+    // capture the aggregated magnitude immediately before and after the
+    // spectral-tilt multiplier, since the two can differ substantially.
+    struct DebugBarSample
+    {
+        int index = 0;
+        double freqHz = 0.0;
+        float preRaw = 0.0f, preDb = 0.0f;
+        float postRaw = 0.0f, postDb = 0.0f;
+    };
+
     void EnsureBackBuffer();
     void ReleaseBackBuffer();
 
@@ -74,9 +90,7 @@ private:
     void DrawPeakMarker(HDC dc, const RECT& barRect, const RECT& area, float peakTopY);
     COLORREF ColorAtHeight(COLORREF top, COLORREF bottom, int y, const RECT& area) const;
     void UpdateAutoGainCeiling(float& ceilingDb, float currentDb);
-    void LogDebugSample(int firstIdx, float firstRaw, float firstDb,
-                         int midIdx, float midRaw, float midDb,
-                         int lastIdx, float lastRaw, float lastDb,
+    void LogDebugSample(const DebugBarSample& bass, const DebugBarSample& mid, const DebugBarSample& treble,
                          int effectiveBarCount) const;
 
     // TEMP DIAGNOSTIC - frame-cadence measurement, see Draw()'s call site.

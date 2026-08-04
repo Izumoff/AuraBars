@@ -1,5 +1,6 @@
 #include "Visualization.h"
 #include "BarGeometry.h"
+#include "FrequencyMap.h"
 #include "apiPlayer.h" // TEMP DIAGNOSTIC (LogCadenceSample) - only user of IAIMPServicePlayer in this file
 #include <algorithm>
 #include <cmath>
@@ -81,7 +82,13 @@ namespace
     // so a typical loud peak lands at/near 0dB (and softer material falls
     // naturally into the floor..ceiling range) instead of deep into
     // positive dB territory that the UI has no range for.
-    const float kReferenceMagnitude = 40.0f;
+    //
+    // Raised from 40.0 to 100.0 on 2026-08-04 to account for spectral
+    // tilt's positive gain range (up to +12dB, i.e. ~4x, at 16kHz) - post-
+    // tilt peaks measured near 98 at the treble reference bar, which the
+    // 40.0 reference would have pushed well past 0dB. Calibrated against
+    // that measured peak, not derived analytically.
+    const float kReferenceMagnitude = 100.0f;
 
     float LinearToDb(float linearValue)
     {
@@ -586,22 +593,33 @@ void CVisualization::UpdateAutoGainCeiling(float& ceilingDb, float currentDb)
     ceilingDb = std::clamp(ceilingDb, kMinCeilingDb, kMaxCeilingDb);
 }
 
-void CVisualization::LogDebugSample(int firstIdx, float firstRaw, float firstDb,
-                                     int midIdx, float midRaw, float midDb,
-                                     int lastIdx, float lastRaw, float lastDb,
+void CVisualization::LogDebugSample(const DebugBarSample& bass, const DebugBarSample& mid, const DebugBarSample& treble,
                                      int effectiveBarCount) const
 {
-    // effectiveBarCount logged explicitly (not just implied by lastIdx+1) so
-    // a horizontal-fit-invariant clamp - e.g. a narrow window quietly
-    // reducing NumberOfBars=20 down to 7 - is visible on the line itself
-    // instead of requiring the reader to notice bar7 where bar20 was expected.
-    wchar_t line[320];
+    // effectiveBarCount logged explicitly (not just implied by the highest
+    // bar index) so a horizontal-fit-invariant clamp - e.g. a narrow window
+    // quietly reducing NumberOfBars=20 down to 7 - is visible on the line
+    // itself instead of requiring the reader to notice a suspiciously low
+    // index where a higher one was expected.
+    //
+    // Bars are frequency-anchored (~60Hz/1kHz/8kHz, Code Contract §3)
+    // rather than fixed indices (bar1/mid/last): a fixed index samples a
+    // different frequency at every bar count or MinFrequency/MaxFrequency
+    // setting, making logs from different runs incomparable. pre_raw/pre_db
+    // are the aggregated magnitude before the spectral-tilt multiplier;
+    // post_raw/post_db are after it - printed separately since tilt's
+    // swing across the logged range can be large enough that one number
+    // alone is ambiguous about how much of it is tilt.
+    wchar_t line[640];
     swprintf_s(line,
-        L"bars=%d floor=%.1fdB ceiling=%.1fdB | bar%d raw=%.5f db=%.2f | bar%d raw=%.5f db=%.2f | bar%d raw=%.5f db=%.2f",
+        L"bars=%d floor=%.1fdB ceiling=%.1fdB"
+        L" | bar[%d]@%.0fHz pre_raw=%.5f pre_db=%.2f post_raw=%.5f post_db=%.2f"
+        L" | bar[%d]@%.0fHz pre_raw=%.5f pre_db=%.2f post_raw=%.5f post_db=%.2f"
+        L" | bar[%d]@%.0fHz pre_raw=%.5f pre_db=%.2f post_raw=%.5f post_db=%.2f",
         effectiveBarCount, g_Settings.dbFloor, g_Settings.dbCeiling,
-        firstIdx + 1, firstRaw, firstDb,
-        midIdx + 1, midRaw, midDb,
-        lastIdx + 1, lastRaw, lastDb);
+        bass.index + 1, bass.freqHz, bass.preRaw, bass.preDb, bass.postRaw, bass.postDb,
+        mid.index + 1, mid.freqHz, mid.preRaw, mid.preDb, mid.postRaw, mid.postDb,
+        treble.index + 1, treble.freqHz, treble.preRaw, treble.preDb, treble.postRaw, treble.postDb);
     AppendDebugLog(line);
 }
 
@@ -774,76 +792,174 @@ void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* d
         return (int)std::llround((double)availWidth * i / n);
     };
 
-    // Log-scale bin edges: bar i covers bins [edge(i), edge(i+1)), and the
-    // edges grow exponentially rather than linearly. Equal-width linear
-    // slices dump a disproportionate share of naturally bass-heavy energy
-    // into a large contiguous block of early bars; growing the range
-    // exponentially gives bass few, narrow bars (edge(0)=0, edge(1)=1) and
-    // treble many, wide ones, like a real spectrum analyzer.
-    auto binEdge = [n](int i) -> int
+    // Frequency-based bar edges (Code Contract §1/§3): geometric in
+    // *frequency* between MinFrequency/MaxFrequency, then converted to bin
+    // indices via FrequencyToBin (FrequencyMap.h/.cpp) - never spaced by
+    // bin index directly. The previous approach spaced edges geometrically
+    // over the raw bin index [0,255], which double-warped the axis on top
+    // of AIMP's own non-linear bin->frequency mapping and caused a
+    // descending staircase with a dead right edge. Do not restore
+    // index-based grouping in any form.
+    const double fMin = (double)g_Settings.minFrequency;
+    const double fMax = (double)g_Settings.maxFrequency;
+    const double freqRatio = fMax / fMin;
+    auto barFreqLo = [fMin, freqRatio, n](int i) -> double { return fMin * std::pow(freqRatio, (double)i / n); };
+    auto barFreqHi = [fMin, freqRatio, n](int i) -> double { return fMin * std::pow(freqRatio, (double)(i + 1) / n); };
+
+    struct BarFreqBins { int lo; int hi; double centerHz; };
+
+    // Shared by the main per-bar loop below and the debug-reference search:
+    // both must agree on exactly which bins a given bar reads, or the
+    // debug log's frequency label wouldn't match what's actually
+    // aggregated for that bar.
+    auto binRangeForBar = [&](int i) -> BarFreqBins
     {
-        if (i <= 0)
-            return 0;
-        if (i >= n)
-            return AIMP_VISUAL_SPECTRUM_MAX;
-        double t = (double)i / n;
-        return (int)std::floor(std::pow((double)AIMP_VISUAL_SPECTRUM_MAX, t));
+        double freqLo = barFreqLo(i);
+        double freqHi = barFreqHi(i);
+        double freqCenter = std::sqrt(freqLo * freqHi);
+
+        int binLo = std::clamp((int)std::lround(FrequencyToBin(freqLo)), 0, (int)AIMP_VISUAL_SPECTRUM_MAX - 1);
+        int binHi = std::clamp((int)std::lround(FrequencyToBin(freqHi)) - 1, 0, (int)AIMP_VISUAL_SPECTRUM_MAX - 1);
+
+        // Below ~160Hz AIMP allocates under one bin per bar (the bottom
+        // three octaves share 9 bins total) - a bar narrower than one bin
+        // resolves to an empty or inverted range here. Read the single
+        // nearest bin instead of interpolating/dithering fake detail;
+        // adjacent low bars sometimes reading the same bin and moving
+        // identically is the data source's limit, not a bug (Code
+        // Contract §3).
+        if (binHi < binLo)
+        {
+            int single = std::clamp((int)std::lround(FrequencyToBin(freqCenter)), 0, (int)AIMP_VISUAL_SPECTRUM_MAX - 1);
+            binLo = binHi = single;
+        }
+
+        return { binLo, binHi, freqCenter };
     };
 
-    // "Bar 20 (or the middle bar)" per the debug-logging spec: bar 20 when
-    // there are enough bars, otherwise the middle one.
-    //
-    // BUG (fixed): this used to read `n >= 20`, so at exactly n==20 the
-    // fixed "bar 20" reference (index 19) collided with debugIdxLast
-    // (n-1==19) - the log showed bar1/bar20/bar20 with the mid sample
-    // silently duplicating the last one. `n > 20` keeps the fixed
-    // reference strictly below the last bar whenever it's used (last ==
-    // n-1 > 19 there), and n==20 now falls through to the n/2 branch
-    // (index 10, bar11) same as any other sub-21 count.
-    const int debugIdxFirst = 0;
-    const int debugIdxMid = (n > 20) ? 19 : n / 2;
-    const int debugIdxLast = n - 1;
-    float debugRawFirst = 0.0f, debugDbFirst = 0.0f;
-    float debugRawMid = 0.0f, debugDbMid = 0.0f;
-    float debugRawLast = 0.0f, debugDbLast = 0.0f;
+    // Debug-logging reference bars (Code Contract §3): frequency-anchored
+    // (~60Hz/1kHz/8kHz) rather than fixed indices, so samples are
+    // comparable across bar counts and MinFrequency/MaxFrequency settings -
+    // a fixed index (e.g. "bar 20") sampled a different frequency at every
+    // configuration. freqHz comes from BinToFrequency on each bar's actual
+    // (post-quantization) bin range, so the printed frequency matches what
+    // was genuinely read, not the idealized pre-quantization bar edge.
+    // Search cost is O(n) and only runs when debug logging is on.
+    DebugBarSample debugBass, debugMid, debugTreble;
+    if (emitDebugLog && g_Settings.debugLogging)
+    {
+        auto findNearestBar = [&](double targetHz) -> DebugBarSample
+        {
+            DebugBarSample best;
+            double bestDist = 1e18;
+            for (int j = 0; j < n; ++j)
+            {
+                BarFreqBins bf = binRangeForBar(j);
+                double actualFreq = BinToFrequency((bf.lo + bf.hi) / 2.0);
+                double dist = std::abs(actualFreq - targetHz);
+                if (dist < bestDist)
+                {
+                    bestDist = dist;
+                    best.index = j;
+                    best.freqHz = actualFreq;
+                }
+            }
+            return best;
+        };
+        debugBass = findNearestBar(60.0);
+        debugMid = findNearestBar(1000.0);
+        debugTreble = findNearestBar(8000.0);
+    }
+
+    // Source channel: Spectrum[0]/[1] are the two channels AIMP's own
+    // VisualSpectrumDemo draws; Spectrum[2] is undocumented and unused by
+    // any reference code, and empirically runs far hotter than a real
+    // magnitude should - almost certainly a raw L+R sum rather than a
+    // properly scaled mono value. Mono mode averages the two documented
+    // channels; Stereo mode reads the caller's single requested channel so
+    // each half genuinely reflects just that channel.
+    auto binValue = [data, spectrumChannel](int b) -> float
+    {
+        return (spectrumChannel < 0)
+            ? 0.5f * (data->Spectrum[0][b] + data->Spectrum[1][b])
+            : data->Spectrum[spectrumChannel][b];
+    };
 
     int x = area.left;
     for (int i = 0; i < n; ++i)
     {
-        int binStart = binEdge(i);
-        int binEnd = std::max(binStart + 1, binEdge(i + 1));
-        binEnd = std::min(binEnd, (int)AIMP_VISUAL_SPECTRUM_MAX);
+        BarFreqBins bf = binRangeForBar(i);
+        int binLo = bf.lo;
+        int binHi = bf.hi;
+        double freqCenter = bf.centerHz;
 
-        // Average, not peak: with log-scale bins the range widens sharply
-        // toward the higher bars, and taking the peak over a wide range
-        // means a single loud bin anywhere in it pins the bar near max
-        // regardless of the region's typical energy. The mean reflects
-        // what that frequency range is actually doing.
-        //
-        // Source channel: Spectrum[0]/[1] are the two channels AIMP's own
-        // VisualSpectrumDemo draws; Spectrum[2] is undocumented and unused
-        // by any reference code, and empirically runs far hotter than a
-        // real magnitude should (bars stayed pinned even at a -20dB
-        // ceiling) - almost certainly a raw L+R sum rather than a properly
-        // scaled mono value. Mono mode averages the two documented
-        // channels; Stereo mode reads the caller's single requested
-        // channel so each half genuinely reflects just that channel.
-        float sum = 0.0f;
-        for (int b = binStart; b < binEnd; ++b)
+        // Peak = max of the bin range (default): with frequency-correct
+        // bins the range still widens toward the higher bars, and a single
+        // loud bin anywhere in it should register - that's what "peak" is
+        // for. Average = arithmetic mean, smooths across the range. Sum =
+        // total, which scales with bin count so upper bars read much
+        // hotter than lower ones; kept for experimentation, not the
+        // default (Code Contract §2/§3).
+        float aggregated;
+        switch (g_Settings.binAggregation)
         {
-            if (spectrumChannel < 0)
-                sum += 0.5f * (data->Spectrum[0][b] + data->Spectrum[1][b]);
-            else
-                sum += data->Spectrum[spectrumChannel][b];
+            case BinAggregation::Peak:
+            {
+                float m = binValue(binLo);
+                for (int b = binLo + 1; b <= binHi; ++b)
+                    m = std::max(m, binValue(b));
+                aggregated = m;
+                break;
+            }
+            case BinAggregation::Sum:
+            {
+                float s = 0.0f;
+                for (int b = binLo; b <= binHi; ++b)
+                    s += binValue(b);
+                aggregated = s;
+                break;
+            }
+            case BinAggregation::Average:
+            default:
+            {
+                float s = 0.0f;
+                for (int b = binLo; b <= binHi; ++b)
+                    s += binValue(b);
+                aggregated = s / (float)(binHi - binLo + 1);
+                break;
+            }
         }
-        float rawValue = sum / (float)(binEnd - binStart);
+
+        // Tilt: linear multiplier so it works identically in both
+        // amplitude modes, applied right after aggregation and before
+        // smoothing so smoothing state holds tilted values (Code Contract
+        // §3 pipeline order: group -> aggregate -> tilt -> smooth ->
+        // amplitude scale -> peak markers). 0.0 disables it (multiplier
+        // == 1 at every frequency).
+        double gainDb = g_Settings.spectralTilt * std::log2(freqCenter / 1000.0);
+        float tiltMultiplier = (float)std::pow(10.0, gainDb / 20.0);
+        float rawValue = aggregated * tiltMultiplier;
         float rawDb = LinearToDb(rawValue);
 
         if (emitDebugLog && g_Settings.debugLogging)
         {
-            if (i == debugIdxFirst) { debugRawFirst = rawValue; debugDbFirst = rawDb; }
-            if (i == debugIdxMid)   { debugRawMid = rawValue; debugDbMid = rawDb; }
-            if (i == debugIdxLast)  { debugRawLast = rawValue; debugDbLast = rawDb; }
+            // pre = aggregated (before tilt), post = rawValue (after) -
+            // both logged since tilt's swing can make one alone ambiguous.
+            if (i == debugBass.index)
+            {
+                debugBass.preRaw = aggregated; debugBass.preDb = LinearToDb(aggregated);
+                debugBass.postRaw = rawValue; debugBass.postDb = rawDb;
+            }
+            if (i == debugMid.index)
+            {
+                debugMid.preRaw = aggregated; debugMid.preDb = LinearToDb(aggregated);
+                debugMid.postRaw = rawValue; debugMid.postDb = rawDb;
+            }
+            if (i == debugTreble.index)
+            {
+                debugTreble.preRaw = aggregated; debugTreble.preDb = LinearToDb(aggregated);
+                debugTreble.postRaw = rawValue; debugTreble.postDb = rawDb;
+            }
         }
 
         // Bar smoothing sits before the Linear/Log scaling branch (and
@@ -917,10 +1033,7 @@ void CVisualization::ComputeBarLayout(const RECT& area, const TAIMPVisualData* d
         if (now - m_LastDebugLogTick >= 1000)
         {
             m_LastDebugLogTick = now;
-            LogDebugSample(debugIdxFirst, debugRawFirst, debugDbFirst,
-                            debugIdxMid, debugRawMid, debugDbMid,
-                            debugIdxLast, debugRawLast, debugDbLast,
-                            n);
+            LogDebugSample(debugBass, debugMid, debugTreble, n);
         }
     }
 }

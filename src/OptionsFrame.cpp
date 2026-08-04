@@ -152,6 +152,15 @@ namespace
     const wchar_t* NameOf(AmplitudeScaling s) { return s == AmplitudeScaling::Linear ? L"Linear" : L"Logarithmic"; }
     const wchar_t* NameOf(GridLineStyle s) { return s == GridLineStyle::Dashed ? L"Dashed" : L"Solid"; }
     const wchar_t* NameOf(ChannelMode m) { return m == ChannelMode::Mono ? L"Mono" : L"Stereo"; }
+    const wchar_t* NameOf(BinAggregation a)
+    {
+        switch (a)
+        {
+            case BinAggregation::Average: return L"Average";
+            case BinAggregation::Sum:     return L"Sum";
+            case BinAggregation::Peak:    default: return L"Peak";
+        }
+    }
     const wchar_t* NameOf(bool b) { return b ? L"true" : L"false"; }
 
     std::wstring ColorHex(COLORREF c)
@@ -405,10 +414,17 @@ namespace
         if (IEquals(v, L"Stereo")) { field = ChannelMode::Stereo; return true; }
         return false;
     }
+    bool ApplyBinAggregation(const std::wstring& v, BinAggregation& field)
+    {
+        if (IEquals(v, L"Average")) { field = BinAggregation::Average; return true; }
+        if (IEquals(v, L"Peak")) { field = BinAggregation::Peak; return true; }
+        if (IEquals(v, L"Sum")) { field = BinAggregation::Sum; return true; }
+        return false;
+    }
 
     using KeyHandler = std::function<bool(const std::wstring&, AuraBarsSettings&)>;
 
-    // Key list mirrors SerializeSettings()'s output one-for-one (46 keys) -
+    // Key list mirrors SerializeSettings()'s output one-for-one (50 keys) -
     // kept immediately below it in this file on purpose, per the contract's
     // "the two must live next to each other" requirement. Key names are
     // matched case-insensitively by the caller (ParseSettings lowercases
@@ -420,6 +436,10 @@ namespace
 
         h[L"debuglogging"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyBool(v, s.debugLogging); };
 
+        h[L"minfrequency"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyInt(v, s.minFrequency); };
+        h[L"maxfrequency"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyInt(v, s.maxFrequency); };
+        h[L"binaggregation"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyBinAggregation(v, s.binAggregation); };
+        h[L"spectraltilt"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyFloat(v, s.spectralTilt); };
         h[L"amplitudescaling"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyAmplitudeScaling(v, s.amplitudeScaling); };
         h[L"dbfloor"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyFloat(v, s.dbFloor); };
         h[L"dbceiling"] = [](const std::wstring& v, AuraBarsSettings& s) { return ApplyFloat(v, s.dbCeiling); };
@@ -992,8 +1012,27 @@ void COptionsFrame::BuildSystemTab(IAIMPUIWinControl* tab)
 void COptionsFrame::BuildScalingTab(IAIMPUIWinControl* tab)
 {
     const int groupW = kFieldX + kFieldW + 10;
+
+    // Frequency Mapping (Code Contract §2/§3), above Amplitude Scaling per
+    // the contract's stated placement.
+    const int freqRows = 4;
+    IAIMPUIGroupBox* freqGroup = CreateGroupBox(tab, 10, 8, groupW, kGroupContentTop + freqRows * kRowH + kGroupContentBottom, L"Frequency Mapping");
+
+    LabelRow(freqGroup, kGroupContentTop, 10, L"Min frequency (Hz, 20-200):");
+    m_MinFreqEdit = CreateEdit(freqGroup, kFieldX, kGroupContentTop, kFieldW, kFieldH);
+
+    LabelRow(freqGroup, kGroupContentTop + kRowH, 10, L"Max frequency (Hz, 4000-20000):");
+    m_MaxFreqEdit = CreateEdit(freqGroup, kFieldX, kGroupContentTop + kRowH, kFieldW, kFieldH);
+
+    LabelRow(freqGroup, kGroupContentTop + 2 * kRowH, 10, L"Bin aggregation:");
+    m_BinAggregationCombo = CreateComboItems(freqGroup, kFieldX, kGroupContentTop + 2 * kRowH, kFieldW, 60, { L"Average", L"Peak", L"Sum" });
+
+    LabelRow(freqGroup, kGroupContentTop + 3 * kRowH, 10, L"Spectral tilt (dB/oct, 0.0-6.0):");
+    m_SpectralTiltEdit = CreateEdit(freqGroup, kFieldX, kGroupContentTop + 3 * kRowH, kFieldW, kFieldH);
+
+    int ampY = 8 + (kGroupContentTop + freqRows * kRowH + kGroupContentBottom) + 10;
     const int rows = 4;
-    IAIMPUIGroupBox* group = CreateGroupBox(tab, 10, 8, groupW, kGroupContentTop + rows * kRowH + kGroupContentBottom, L"Amplitude Scaling");
+    IAIMPUIGroupBox* group = CreateGroupBox(tab, 10, ampY, groupW, kGroupContentTop + rows * kRowH + kGroupContentBottom, L"Amplitude Scaling");
 
     LabelRow(group, kGroupContentTop, 10, L"Amplitude scaling:");
     m_AmpScaleCombo = CreateCombo(group, kFieldX, kGroupContentTop, kFieldW, 60, L"Linear", L"Logarithmic (dB)");
@@ -1006,7 +1045,7 @@ void COptionsFrame::BuildScalingTab(IAIMPUIWinControl* tab)
 
     m_AutoGainCheck = CreateCheckBox(group, 10, kGroupContentTop + 3 * kRowH, groupW - 20, 12, L"Auto-gain ceiling (overrides dB ceiling above)");
 
-    int smoothY = 8 + (kGroupContentTop + rows * kRowH + kGroupContentBottom) + 10;
+    int smoothY = ampY + (kGroupContentTop + rows * kRowH + kGroupContentBottom) + 10;
     const int smoothRows = 3;
     IAIMPUIGroupBox* smoothGroup = CreateGroupBox(tab, 10, smoothY, groupW, kGroupContentTop + smoothRows * kRowH + kGroupContentBottom, L"Bar Smoothing");
 
@@ -1222,6 +1261,10 @@ void COptionsFrame::PopulateControls()
     EnableAllControls();
 
     SetEditInt(m_BarCountEdit, m_Working.barCount);
+    SetEditInt(m_MinFreqEdit, m_Working.minFrequency);
+    SetEditInt(m_MaxFreqEdit, m_Working.maxFrequency);
+    SetComboIndex(m_BinAggregationCombo, (int)m_Working.binAggregation);
+    SetEditFloat(m_SpectralTiltEdit, m_Working.spectralTilt);
     SetComboIndex(m_AmpScaleCombo, (int)m_Working.amplitudeScaling);
     SetEditFloat(m_DbFloorEdit, m_Working.dbFloor);
     SetEditFloat(m_DbCeilingEdit, m_Working.dbCeiling);
@@ -1278,6 +1321,14 @@ void COptionsFrame::PopulateControls()
 void COptionsFrame::ReadControlsIntoWorking()
 {
     m_Working.barCount = GetEditInt(m_BarCountEdit, m_Working.barCount);
+    m_Working.minFrequency = GetEditInt(m_MinFreqEdit, m_Working.minFrequency);
+    m_Working.maxFrequency = GetEditInt(m_MaxFreqEdit, m_Working.maxFrequency);
+    // Min/Max frequency's "at least one octave apart" rule (Code Contract
+    // §2) is enforced by ClampSettings, the same single point that already
+    // resolves dBFloor/dBCeiling's analogous constraint - not duplicated
+    // here.
+    m_Working.binAggregation = (BinAggregation)GetValidatedComboIndex(m_BinAggregationCombo, (int)m_Working.binAggregation, 2, L"BinAggregation");
+    m_Working.spectralTilt = GetEditFloat(m_SpectralTiltEdit, m_Working.spectralTilt);
     m_Working.amplitudeScaling = (AmplitudeScaling)GetValidatedComboIndex(m_AmpScaleCombo, (int)m_Working.amplitudeScaling, 1, L"AmplitudeScaling");
     m_Working.dbFloor = GetEditFloat(m_DbFloorEdit, m_Working.dbFloor);
     m_Working.dbCeiling = GetEditFloat(m_DbCeilingEdit, m_Working.dbCeiling);
@@ -1597,6 +1648,10 @@ std::wstring SerializeSettings(const AuraBarsSettings& s)
     // reconciled Code Contract - so it's grouped here to match "sections in
     // tab order."
     out += L"[Scaling]\r\n";
+    out += L"MinFrequency="; out += std::to_wstring(s.minFrequency); out += L"\r\n";
+    out += L"MaxFrequency="; out += std::to_wstring(s.maxFrequency); out += L"\r\n";
+    out += L"BinAggregation="; out += NameOf(s.binAggregation); out += L"\r\n";
+    out += L"SpectralTilt="; out += Float1(s.spectralTilt); out += L"\r\n";
     out += L"AmplitudeScaling="; out += NameOf(s.amplitudeScaling); out += L"\r\n";
     out += L"dBFloor="; out += Float1(s.dbFloor); out += L"\r\n";
     out += L"dBCeiling="; out += Float1(s.dbCeiling); out += L"\r\n";

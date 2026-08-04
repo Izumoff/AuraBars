@@ -202,7 +202,12 @@ private:
     IAIMPUIButton* m_PasteClipboardBtn = nullptr;
     IAIMPUICheckBox* m_DebugLogCheck = nullptr;
 
-    // Scaling tab
+    // Scaling tab - Frequency Mapping group (Code Contract §2/§3)
+    IAIMPUIEdit* m_MinFreqEdit = nullptr;
+    IAIMPUIEdit* m_MaxFreqEdit = nullptr;
+    IAIMPUIComboBox* m_BinAggregationCombo = nullptr;
+    IAIMPUIEdit* m_SpectralTiltEdit = nullptr;
+
     IAIMPUIComboBox* m_AmpScaleCombo = nullptr;
     IAIMPUILabel* m_DbFloorLabel = nullptr;
     IAIMPUIEdit* m_DbFloorEdit = nullptr;

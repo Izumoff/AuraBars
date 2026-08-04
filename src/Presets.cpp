@@ -32,6 +32,10 @@ EnvAimpVersion=v5.40.2703
 DebugLogging=false
 
 [Scaling]
+MinFrequency=35
+MaxFrequency=16000
+BinAggregation=Peak
+SpectralTilt=3.0
 AmplitudeScaling=Logarithmic
 dBFloor=-40.0
 dBCeiling=0.0
@@ -109,6 +113,10 @@ EnvAimpVersion=v5.40.2703
 DebugLogging=false
 
 [Scaling]
+MinFrequency=35
+MaxFrequency=16000
+BinAggregation=Peak
+SpectralTilt=3.0
 AmplitudeScaling=Logarithmic
 dBFloor=-40.0
 dBCeiling=0.0
@@ -188,6 +196,10 @@ EnvAimpVersion=v5.40.2703
 DebugLogging=false
 
 [Scaling]
+MinFrequency=35
+MaxFrequency=16000
+BinAggregation=Peak
+SpectralTilt=3.0
 AmplitudeScaling=Logarithmic
 dBFloor=-40.0
 dBCeiling=0.0
@@ -267,6 +279,10 @@ EnvAimpVersion=v5.40.2703
 DebugLogging=false
 
 [Scaling]
+MinFrequency=35
+MaxFrequency=16000
+BinAggregation=Peak
+SpectralTilt=3.0
 AmplitudeScaling=Logarithmic
 dBFloor=-40.0
 dBCeiling=0.0
@@ -346,6 +362,10 @@ EnvAimpVersion=v5.40.2703
 DebugLogging=false
 
 [Scaling]
+MinFrequency=35
+MaxFrequency=16000
+BinAggregation=Peak
+SpectralTilt=3.0
 AmplitudeScaling=Logarithmic
 dBFloor=-40.0
 dBCeiling=0.0
